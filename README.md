@@ -45,6 +45,9 @@ const funnel = useIncrementalFunnel<CustomerFunnelValues>({
   createSession: async () => {
     return api.createDraftSession();
   },
+  submitRemote: async values => {
+    await api.submitFunnel(values);
+  },
   storageAdapters: {
     // Optional: swap any built-in adapter with a custom one
     memory: createMemoryStorageAdapter()
@@ -65,6 +68,7 @@ funnel.updateValues({ email: 'hello@example.com' });
 funnel.nextStep();
 funnel.markStepComplete('welcome');
 funnel.markSubmitted();
+await funnel.submit();
 funnel.clearValues();
 
 if (funnel.savedProgressExists) {
@@ -73,6 +77,10 @@ if (funnel.savedProgressExists) {
   } else {
     funnel.continueSavedProgress();
   }
+}
+
+if (funnel.submitStatus === 'failed') {
+  console.error(funnel.submitError);
 }
 
 // clears persisted progress only

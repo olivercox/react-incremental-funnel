@@ -84,6 +84,8 @@ describe('useIncrementalFunnel', () => {
     expect(snapshot?.sessionMetadata).toBeNull();
     expect(snapshot?.sessionCreationStatus).toBe('idle');
     expect(snapshot?.sessionCreationError).toBeNull();
+    expect(snapshot?.submitStatus).toBe('idle');
+    expect(snapshot?.submitError).toBeNull();
   });
 
   it('updates partial values', () => {
@@ -424,6 +426,102 @@ describe('useIncrementalFunnel', () => {
     await snapshot?.flushRemoteUpdates();
 
     expect(updates).toEqual([{ email: 'hello@example.com' }]);
+  });
+
+  it('supports submit flow success and local-state clearing', async () => {
+    type FunnelValues = {
+      email?: string;
+    };
+    const updates: Partial<FunnelValues>[] = [];
+    const submitted: Partial<FunnelValues>[] = [];
+    const localStorageAdapter = {
+      getItem: vi.fn(() => null),
+      setItem: vi.fn(),
+      removeItem: vi.fn()
+    };
+    const sessionStorageAdapter = {
+      getItem: vi.fn(() => null),
+      setItem: vi.fn(),
+      removeItem: vi.fn()
+    };
+    const memoryStorageAdapter = {
+      getItem: vi.fn(() => null),
+      setItem: vi.fn(),
+      removeItem: vi.fn()
+    };
+    let snapshot:
+      | ReturnType<typeof useIncrementalFunnel<FunnelValues>>
+      | undefined;
+
+    function Example(): null {
+      const didUpdateRef = useRef(false);
+      const funnel = useIncrementalFunnel<FunnelValues>({
+        storageKey: 'customer-funnel',
+        debounceMs: 1_000,
+        updateRemote: async values => {
+          updates.push(values);
+        },
+        submitRemote: async values => {
+          submitted.push(values);
+        },
+        storageAdapters: {
+          local: localStorageAdapter,
+          session: sessionStorageAdapter,
+          memory: memoryStorageAdapter
+        }
+      });
+
+      if (!didUpdateRef.current) {
+        didUpdateRef.current = true;
+        funnel.updateValues({ email: 'hello@example.com' });
+      }
+
+      snapshot = funnel;
+      return null;
+    }
+
+    renderToString(createElement(Example));
+    expect(snapshot?.submitStatus).toBe('idle');
+    await expect(snapshot?.submit()).resolves.toBeUndefined();
+
+    expect(updates).toEqual([{ email: 'hello@example.com' }]);
+    expect(submitted).toEqual([{ email: 'hello@example.com' }]);
+    expect(localStorageAdapter.removeItem).toHaveBeenCalledWith('customer-funnel');
+    expect(sessionStorageAdapter.removeItem).toHaveBeenCalledWith('customer-funnel');
+    expect(memoryStorageAdapter.removeItem).toHaveBeenCalledWith('customer-funnel');
+  });
+
+  it('exposes submit validation errors and blocks automatic remote updates after submit', async () => {
+    type FunnelValues = {
+      email?: string;
+    };
+    const updates: Partial<FunnelValues>[] = [];
+    const submitError = { fieldErrors: { email: 'Email is required' } };
+    let snapshot:
+      | ReturnType<typeof useIncrementalFunnel<FunnelValues>>
+      | undefined;
+
+    function Example(): null {
+      snapshot = useIncrementalFunnel<FunnelValues>({
+        initialValues: { email: 'start@example.com' },
+        updateRemote: async values => {
+          updates.push(values);
+        },
+        submitRemote: async () => {
+          throw submitError;
+        }
+      });
+      return null;
+    }
+
+    renderToString(createElement(Example));
+    await expect(snapshot?.submit()).rejects.toBe(submitError);
+
+    snapshot?.markSubmitted();
+    snapshot?.updateValues({ email: 'next@example.com' });
+    await snapshot?.flushRemoteUpdates();
+
+    expect(updates).toEqual([]);
   });
 
   it('supports debounced remote updates', async () => {
