@@ -57,4 +57,18 @@ describe('field persistence policies', () => {
     expect(expired.expiredPaths).toEqual(['customer.email']);
     expect(expired.nextValues).toEqual({});
   });
+
+  it('ignores unsafe path segments to prevent prototype pollution', () => {
+    const policies = normalizeFieldPolicies({
+      '__proto__.polluted': { persist: 'local' },
+      safe: { persist: 'local' }
+    });
+
+    const persisted = buildFieldStateForMode({ safe: 'ok' }, policies, 'local', 1);
+    const hydrated = applyFieldStateForMode({}, policies, 'local', persisted, 1);
+
+    expect(Object.keys(policies)).toEqual(['safe']);
+    expect(({} as { polluted?: unknown }).polluted).toBeUndefined();
+    expect(hydrated.nextValues).toEqual({ safe: 'ok' });
+  });
 });

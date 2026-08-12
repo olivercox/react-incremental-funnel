@@ -19,6 +19,23 @@ export interface PersistedFieldEntry {
 
 export type PersistedFieldState = Record<string, PersistedFieldEntry>;
 
+function isSafePathSegment(segment: string): boolean {
+  return (
+    segment.length > 0 &&
+    segment !== '__proto__' &&
+    segment !== 'prototype' &&
+    segment !== 'constructor'
+  );
+}
+
+function toSafePathSegments(path: string): string[] | null {
+  const segments = path.split('.');
+  if (segments.some(segment => !isSafePathSegment(segment))) {
+    return null;
+  }
+  return segments;
+}
+
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -27,7 +44,10 @@ export function getValueAtPath(
   source: Record<string, unknown>,
   path: string
 ): unknown {
-  const segments = path.split('.');
+  const segments = toSafePathSegments(path);
+  if (!segments) {
+    return undefined;
+  }
   let current: unknown = source;
 
   for (const segment of segments) {
@@ -45,11 +65,21 @@ export function setValueAtPath(
   path: string,
   value: unknown
 ): void {
-  const segments = path.split('.');
+  const segments = toSafePathSegments(path);
+  if (!segments) {
+    return;
+  }
   let current = target;
 
   for (let index = 0; index < segments.length - 1; index += 1) {
     const segment = segments[index]!;
+    if (
+      segment === '__proto__' ||
+      segment === 'prototype' ||
+      segment === 'constructor'
+    ) {
+      return;
+    }
     const next = current[segment];
 
     if (!isRecord(next)) {
@@ -59,7 +89,15 @@ export function setValueAtPath(
     current = current[segment] as Record<string, unknown>;
   }
 
-  current[segments[segments.length - 1]!] = value;
+  const finalSegment = segments[segments.length - 1]!;
+  if (
+    finalSegment === '__proto__' ||
+    finalSegment === 'prototype' ||
+    finalSegment === 'constructor'
+  ) {
+    return;
+  }
+  current[finalSegment] = value;
 }
 
 export function normalizeFieldPolicies(
@@ -71,7 +109,12 @@ export function normalizeFieldPolicies(
 
   const normalized: FieldPersistencePolicies = {};
   for (const [path, policy] of Object.entries(policies)) {
-    if (!path || !policy || typeof policy.persist !== 'string') {
+    if (
+      !path ||
+      !policy ||
+      typeof policy.persist !== 'string' ||
+      !toSafePathSegments(path)
+    ) {
       continue;
     }
     normalized[path] = policy;
