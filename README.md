@@ -14,6 +14,7 @@ npm install react-incremental-funnel
 import {
   createFunnel,
   advanceFunnel,
+  createMemoryStorageAdapter,
   type FunnelStep
 } from 'react-incremental-funnel';
 
@@ -41,6 +42,10 @@ type CustomerFunnelValues = {
 
 const funnel = useIncrementalFunnel<CustomerFunnelValues>({
   storageKey: 'customer-funnel',
+  storageAdapters: {
+    // Optional: swap any built-in adapter with a custom one
+    memory: createMemoryStorageAdapter()
+  },
   steps: ['welcome', 'details', 'confirm'],
   fieldPolicies: {
     funnelVariant: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 },
@@ -74,4 +79,5 @@ npm run build
 - `createFunnel`
 - `advanceFunnel`
 - `useIncrementalFunnel`
+- `createLocalStorageAdapter`, `createSessionStorageAdapter`, `createMemoryStorageAdapter`
 - `FunnelStep`, `FunnelState`, `UseIncrementalFunnelOptions`, `UseIncrementalFunnelResult`, `FunnelStepId`
