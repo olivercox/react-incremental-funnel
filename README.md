@@ -15,13 +15,13 @@ import {
   createFunnel,
   advanceFunnel,
   useIncrementalFunnel,
-  type FunnelStep,
+  type FunnelStep
 } from 'react-incremental-funnel';
 
 const steps: FunnelStep<'welcome' | 'details' | 'confirm'>[] = [
   { id: 'welcome', label: 'Welcome' },
   { id: 'details', label: 'Details' },
-  { id: 'confirm', label: 'Confirm' },
+  { id: 'confirm', label: 'Confirm' }
 ];
 
 const initial = createFunnel(steps);

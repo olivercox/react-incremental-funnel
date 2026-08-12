@@ -6,7 +6,7 @@ describe('createFunnel', () => {
   const steps: FunnelStep<'welcome' | 'details' | 'confirm'>[] = [
     { id: 'welcome', label: 'Welcome' },
     { id: 'details', label: 'Details' },
-    { id: 'confirm', label: 'Confirm' },
+    { id: 'confirm', label: 'Confirm' }
   ];
 
   it('creates a funnel with the first step by default', () => {
@@ -26,8 +26,8 @@ describe('createFunnel', () => {
     expect(() =>
       createFunnel([
         { id: 'welcome', label: 'Welcome' },
-        { id: 'welcome', label: 'Welcome again' },
-      ]),
+        { id: 'welcome', label: 'Welcome again' }
+      ])
     ).toThrowError('Funnel steps must have unique ids.');
   });
 });
@@ -36,7 +36,7 @@ describe('advanceFunnel', () => {
   it('advances to the requested step', () => {
     const steps: FunnelStep<'welcome' | 'details'>[] = [
       { id: 'welcome', label: 'Welcome' },
-      { id: 'details', label: 'Details' },
+      { id: 'details', label: 'Details' }
     ];
 
     const initial = createFunnel(steps);
