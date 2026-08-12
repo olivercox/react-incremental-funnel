@@ -90,6 +90,7 @@ export interface UseIncrementalFunnelOptions<
   includeStepStateInRemoteUpdate?: boolean;
   debounceMs?: number;
   storageAdapters?: Partial<Record<'local' | 'session' | 'memory', StorageAdapter>>;
+  createSession?: () => Promise<unknown>;
   updateRemote?: (values: Partial<TValues>) => void | Promise<void>;
   remoteUpdate?: (
     update: IncrementalFunnelRemoteUpdate<TValues, TStepId>
@@ -103,6 +104,8 @@ export type RemoteSyncStatus =
   | 'synced'
   | 'failed';
 
+export type SessionCreationStatus = 'idle' | 'creating' | 'created' | 'failed';
+
 export interface UseIncrementalFunnelResult<
   TValues extends Record<string, unknown>,
   TStepId extends FunnelStepId = FunnelStepId
@@ -114,6 +117,9 @@ export interface UseIncrementalFunnelResult<
   hasSavedProgress: boolean;
   remoteSyncStatus: RemoteSyncStatus;
   lastSuccessfulRemoteSyncAt: number | null;
+  sessionMetadata: unknown;
+  sessionCreationStatus: SessionCreationStatus;
+  sessionCreationError: unknown;
   currentStepId: TStepId | null;
   completedStepIds: readonly TStepId[];
   canGoNext: boolean;
@@ -201,6 +207,7 @@ export function useIncrementalFunnel<
     includeStepStateInRemoteUpdate = false,
     debounceMs = 0,
     storageAdapters,
+    createSession,
     updateRemote,
     remoteUpdate
   } = options;
@@ -252,6 +259,11 @@ export function useIncrementalFunnel<
     useState<RemoteSyncStatus>('idle');
   const [lastSuccessfulRemoteSyncAt, setLastSuccessfulRemoteSyncAt] =
     useState<number | null>(null);
+  const [sessionMetadata, setSessionMetadata] = useState<unknown>(null);
+  const [sessionCreationStatus, setSessionCreationStatus] =
+    useState<SessionCreationStatus>('idle');
+  const [sessionCreationError, setSessionCreationError] = useState<unknown>(null);
+  const didStartSessionCreationRef = useRef(false);
   const pendingRemoteValuesRef = useRef<Partial<TValues>>({});
   const pendingRemoteStepStateRef = useRef<PersistedStepState<TStepId> | null>(
     null
@@ -273,6 +285,37 @@ export function useIncrementalFunnel<
       previous.filter(stepId => stepIds.has(stepId))
     );
   }, [initialCurrentStepId, stepIds]);
+
+  useEffect(() => {
+    if (!createSession || didStartSessionCreationRef.current) {
+      return;
+    }
+
+    didStartSessionCreationRef.current = true;
+    let isCancelled = false;
+    setSessionCreationStatus('creating');
+    setSessionCreationError(null);
+
+    void createSession()
+      .then(metadata => {
+        if (isCancelled) {
+          return;
+        }
+        setSessionMetadata(metadata);
+        setSessionCreationStatus('created');
+      })
+      .catch(error => {
+        if (isCancelled) {
+          return;
+        }
+        setSessionCreationError(error);
+        setSessionCreationStatus('failed');
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [createSession]);
 
   useEffect(() => {
     if (
@@ -855,6 +898,9 @@ export function useIncrementalFunnel<
     hasSavedProgress,
     remoteSyncStatus,
     lastSuccessfulRemoteSyncAt,
+    sessionMetadata,
+    sessionCreationStatus,
+    sessionCreationError,
     currentStepId,
     completedStepIds,
     canGoNext,

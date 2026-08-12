@@ -42,6 +42,9 @@ type CustomerFunnelValues = {
 
 const funnel = useIncrementalFunnel<CustomerFunnelValues>({
   storageKey: 'customer-funnel',
+  createSession: async () => {
+    return api.createDraftSession();
+  },
   storageAdapters: {
     // Optional: swap any built-in adapter with a custom one
     memory: createMemoryStorageAdapter()
