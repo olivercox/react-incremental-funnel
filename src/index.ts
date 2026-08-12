@@ -93,6 +93,19 @@ export interface UseIncrementalFunnelOptions<
   createSession?: () => Promise<unknown>;
   updateRemote?: (values: Partial<TValues>) => void | Promise<void>;
   submitRemote?: (values: Partial<TValues>) => void | Promise<void>;
+  validateStep?: (
+    stepId: TStepId | null,
+    values: Partial<TValues>
+  ) =>
+    | IncrementalFunnelValidationResult
+    | void
+    | Promise<IncrementalFunnelValidationResult | void>;
+  validateAll?: (
+    values: Partial<TValues>
+  ) =>
+    | IncrementalFunnelValidationResult
+    | void
+    | Promise<IncrementalFunnelValidationResult | void>;
   remoteUpdate?: (
     update: IncrementalFunnelRemoteUpdate<TValues, TStepId>
   ) => void | Promise<void>;
@@ -127,6 +140,9 @@ export interface UseIncrementalFunnelResult<
   sessionCreationError: unknown;
   submitStatus: SubmitStatus;
   submitError: unknown;
+  currentStepValidationErrors: readonly unknown[];
+  fieldValidationErrors: Readonly<Record<string, unknown>>;
+  canContinueCurrentStep: boolean;
   currentStepId: TStepId | null;
   completedStepIds: readonly TStepId[];
   canGoNext: boolean;
@@ -166,6 +182,11 @@ export interface IncrementalFunnelRemoteUpdate<
     currentStepId: TStepId | null;
     completedStepIds: readonly TStepId[];
   };
+}
+
+export interface IncrementalFunnelValidationResult {
+  stepErrors?: readonly unknown[];
+  fieldErrors?: Readonly<Record<string, unknown>>;
 }
 
 interface PersistedStepState<TStepId extends FunnelStepId = FunnelStepId> {
@@ -222,6 +243,66 @@ function areShallowEqualObjects(
   return leftKeys.every(key => Object.is(left[key], right[key]));
 }
 
+interface ValidationState {
+  stepErrors: readonly unknown[];
+  fieldErrors: Readonly<Record<string, unknown>>;
+}
+
+function createEmptyValidationState(): ValidationState {
+  return {
+    stepErrors: [],
+    fieldErrors: {}
+  };
+}
+
+function hasValidationErrors(validationState: ValidationState): boolean {
+  return (
+    validationState.stepErrors.length > 0 ||
+    Object.keys(validationState.fieldErrors).length > 0
+  );
+}
+
+function isPromiseLike<T>(value: unknown): value is PromiseLike<T> {
+  return (
+    (typeof value === 'object' || typeof value === 'function') &&
+    value !== null &&
+    'then' in value &&
+    typeof value.then === 'function'
+  );
+}
+
+function toValidationState(value: unknown): ValidationState {
+  if (typeof value === 'undefined' || value === null) {
+    return createEmptyValidationState();
+  }
+
+  if (value instanceof Error) {
+    return {
+      stepErrors: [value.message],
+      fieldErrors: {}
+    };
+  }
+
+  if (Array.isArray(value)) {
+    return {
+      stepErrors: [...value],
+      fieldErrors: {}
+    };
+  }
+
+  if (isRecord(value)) {
+    return {
+      stepErrors: Array.isArray(value.stepErrors) ? [...value.stepErrors] : [],
+      fieldErrors: isRecord(value.fieldErrors) ? { ...value.fieldErrors } : {}
+    };
+  }
+
+  return {
+    stepErrors: [value],
+    fieldErrors: {}
+  };
+}
+
 export function useIncrementalFunnel<
   TValues extends Record<string, unknown>,
   TStepId extends FunnelStepId = FunnelStepId
@@ -241,6 +322,8 @@ export function useIncrementalFunnel<
     createSession,
     updateRemote,
     submitRemote,
+    validateStep,
+    validateAll,
     remoteUpdate
   } = options;
   const steps = useMemo(() => [...(configuredSteps ?? [])], [configuredSteps]);
@@ -300,8 +383,15 @@ export function useIncrementalFunnel<
   const [sessionCreationError, setSessionCreationError] = useState<unknown>(null);
   const [submitStatus, setSubmitStatus] = useState<SubmitStatus>('idle');
   const [submitError, setSubmitError] = useState<unknown>(null);
+  const [stepValidationState, setStepValidationState] = useState<ValidationState>(
+    () => createEmptyValidationState()
+  );
+  const [allValidationState, setAllValidationState] = useState<ValidationState>(
+    () => createEmptyValidationState()
+  );
   const didStartSessionCreationRef = useRef(false);
   const sessionCreationRequestIdRef = useRef(0);
+  const stepValidationRequestIdRef = useRef(0);
   const pendingRemoteValuesRef = useRef<Partial<TValues>>({});
   const pendingRemoteStepStateRef = useRef<PersistedStepState<TStepId> | null>(
     null
@@ -312,6 +402,51 @@ export function useIncrementalFunnel<
   const completedStepIdsRef = useRef<TStepId[]>([]);
   const isSubmittedRef = useRef(false);
   const resolvedRemoteUpdate = updateRemote ?? remoteUpdate;
+
+  const runStepValidation = useCallback(
+    (stepId: TStepId | null, nextValues: Partial<TValues>) => {
+      if (!validateStep) {
+        setStepValidationState(createEmptyValidationState());
+        return;
+      }
+
+      stepValidationRequestIdRef.current += 1;
+      const requestId = stepValidationRequestIdRef.current;
+
+      try {
+        const validationResult = validateStep(stepId, nextValues);
+        if (
+          isPromiseLike<IncrementalFunnelValidationResult | void>(validationResult)
+        ) {
+          void validationResult
+            .then(asyncResult => {
+              if (requestId !== stepValidationRequestIdRef.current) {
+                return;
+              }
+              setStepValidationState(toValidationState(asyncResult));
+            })
+            .catch(error => {
+              if (requestId !== stepValidationRequestIdRef.current) {
+                return;
+              }
+              setStepValidationState(toValidationState(error));
+            });
+          return;
+        }
+
+        if (requestId !== stepValidationRequestIdRef.current) {
+          return;
+        }
+        setStepValidationState(toValidationState(validationResult));
+      } catch (error) {
+        if (requestId !== stepValidationRequestIdRef.current) {
+          return;
+        }
+        setStepValidationState(toValidationState(error));
+      }
+    },
+    [validateStep]
+  );
 
   const requestSessionCreation = useCallback(() => {
     if (!createSession) {
@@ -913,15 +1048,19 @@ export function useIncrementalFunnel<
 
   const updateValues = useCallback(
     (nextValues: Partial<TValues>) => {
-      setValues(
-        previousValues => ({ ...previousValues, ...nextValues }) as Partial<TValues>
-      );
+      const mergedValues = {
+        ...values,
+        ...nextValues
+      } as Partial<TValues>;
+      setValues(mergedValues);
+      setAllValidationState(createEmptyValidationState());
+      runStepValidation(currentStepIdRef.current, mergedValues);
       queueRemoteUpdate(nextValues, {
         currentStepId: currentStepIdRef.current,
         completedStepIds: completedStepIdsRef.current
       });
     },
-    [queueRemoteUpdate]
+    [queueRemoteUpdate, runStepValidation, values]
   );
 
   const clearValues = useCallback(() => {
@@ -930,6 +1069,8 @@ export function useIncrementalFunnel<
     isSubmittedRef.current = false;
     setSubmitStatus('idle');
     setSubmitError(null);
+    setStepValidationState(createEmptyValidationState());
+    setAllValidationState(createEmptyValidationState());
     queueRemoteUpdate(resolvedInitialValues, {
       currentStepId: currentStepIdRef.current,
       completedStepIds: completedStepIdsRef.current
@@ -960,6 +1101,8 @@ export function useIncrementalFunnel<
     isSubmittedRef.current = false;
     setSubmitStatus('idle');
     setSubmitError(null);
+    setStepValidationState(createEmptyValidationState());
+    setAllValidationState(createEmptyValidationState());
     setRemoteSyncStatus('idle');
     pendingRemoteValuesRef.current = {} as Partial<TValues>;
     pendingRemoteStepStateRef.current = null;
@@ -987,6 +1130,8 @@ export function useIncrementalFunnel<
     isSubmittedRef.current = true;
     setSubmitStatus('submitted');
     setSubmitError(null);
+    setStepValidationState(createEmptyValidationState());
+    setAllValidationState(createEmptyValidationState());
   }, []);
 
   const submit = useCallback(async () => {
@@ -997,9 +1142,23 @@ export function useIncrementalFunnel<
     setSubmitStatus('submitting');
     setSubmitError(null);
 
-    await flushRemoteUpdates();
-
     try {
+      if (validateAll) {
+        const validationResult = await validateAll(values);
+        const nextValidationState = toValidationState(validationResult);
+        setAllValidationState(nextValidationState);
+        if (hasValidationErrors(nextValidationState)) {
+          throw {
+            stepErrors: nextValidationState.stepErrors,
+            fieldErrors: nextValidationState.fieldErrors
+          };
+        }
+      } else {
+        setAllValidationState(createEmptyValidationState());
+      }
+
+      await flushRemoteUpdates();
+
       if (submitRemote) {
         await submitRemote(values);
       }
@@ -1014,13 +1173,26 @@ export function useIncrementalFunnel<
       isSubmittedRef.current = true;
       setSubmitStatus('submitted');
       setSubmitError(null);
+      setStepValidationState(createEmptyValidationState());
+      setAllValidationState(createEmptyValidationState());
       clearSavedProgress();
     } catch (error) {
+      const nextValidationState = toValidationState(error);
+      if (hasValidationErrors(nextValidationState)) {
+        setAllValidationState(nextValidationState);
+      }
       setSubmitStatus('failed');
       setSubmitError(error);
       throw error;
     }
-  }, [clearSavedProgress, flushRemoteUpdates, submitRemote, submitStatus, values]);
+  }, [
+    clearSavedProgress,
+    flushRemoteUpdates,
+    submitRemote,
+    submitStatus,
+    validateAll,
+    values
+  ]);
 
   const goToStep = useCallback(
     (stepId: TStepId) => {
@@ -1028,12 +1200,13 @@ export function useIncrementalFunnel<
         throw new Error('Step id must exist in steps.');
       }
       setCurrentStepId(stepId);
+      runStepValidation(stepId, values);
       queueRemoteUpdate({} as Partial<TValues>, {
         currentStepId: stepId,
         completedStepIds: completedStepIdsRef.current
       });
     },
-    [queueRemoteUpdate, stepIds]
+    [queueRemoteUpdate, runStepValidation, stepIds, values]
   );
 
   const nextStep = useCallback(() => {
@@ -1048,13 +1221,14 @@ export function useIncrementalFunnel<
       }
 
       const nextStepId = steps[previousIndex + 1] as TStepId;
+      runStepValidation(nextStepId, values);
       queueRemoteUpdate({} as Partial<TValues>, {
         currentStepId: nextStepId,
         completedStepIds: completedStepIdsRef.current
       });
       return nextStepId;
     });
-  }, [queueRemoteUpdate, steps]);
+  }, [queueRemoteUpdate, runStepValidation, steps, values]);
 
   const previousStep = useCallback(() => {
     setCurrentStepId(previousStepId => {
@@ -1068,13 +1242,14 @@ export function useIncrementalFunnel<
       }
 
       const nextStepId = steps[previousIndex - 1] as TStepId;
+      runStepValidation(nextStepId, values);
       queueRemoteUpdate({} as Partial<TValues>, {
         currentStepId: nextStepId,
         completedStepIds: completedStepIdsRef.current
       });
       return nextStepId;
     });
-  }, [queueRemoteUpdate, steps]);
+  }, [queueRemoteUpdate, runStepValidation, steps, values]);
 
   const markStepComplete = useCallback(
     (stepId: TStepId) => {
@@ -1128,6 +1303,21 @@ export function useIncrementalFunnel<
 
   const canGoNext = currentStepIndex >= 0 && currentStepIndex < steps.length - 1;
   const canGoBack = currentStepIndex > 0;
+  const currentStepValidationErrors = useMemo(
+    () => [...stepValidationState.stepErrors, ...allValidationState.stepErrors],
+    [allValidationState.stepErrors, stepValidationState.stepErrors]
+  );
+  const fieldValidationErrors = useMemo(
+    () => ({
+      ...allValidationState.fieldErrors,
+      ...stepValidationState.fieldErrors
+    }),
+    [allValidationState.fieldErrors, stepValidationState.fieldErrors]
+  );
+  const canContinueCurrentStep = useMemo(
+    () => !hasValidationErrors(stepValidationState),
+    [stepValidationState]
+  );
 
   return {
     values,
@@ -1145,6 +1335,9 @@ export function useIncrementalFunnel<
     sessionCreationError,
     submitStatus,
     submitError,
+    currentStepValidationErrors,
+    fieldValidationErrors,
+    canContinueCurrentStep,
     currentStepId,
     completedStepIds,
     canGoNext,
