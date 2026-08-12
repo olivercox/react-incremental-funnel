@@ -78,6 +78,9 @@ describe('useIncrementalFunnel', () => {
     expect(snapshot?.isDirty).toBe(false);
     expect(snapshot?.isSubmitted).toBe(false);
     expect(snapshot?.hasSavedProgress).toBe(false);
+    expect(snapshot?.sessionMetadata).toBeNull();
+    expect(snapshot?.sessionCreationStatus).toBe('idle');
+    expect(snapshot?.sessionCreationError).toBeNull();
   });
 
   it('updates partial values', () => {
@@ -167,6 +170,35 @@ describe('useIncrementalFunnel', () => {
     delete globalThis.window;
 
     expect(() => renderToString(createElement(Example))).not.toThrow();
+
+    if (typeof previousWindow !== 'undefined') {
+      globalThis.window = previousWindow;
+    }
+  });
+
+  it('accepts createSession without persisting session data during server render', () => {
+    const createSession = vi.fn(async () => ({ id: 'server-only' }));
+    let snapshot:
+      | ReturnType<typeof useIncrementalFunnel<Record<string, unknown>>>
+      | undefined;
+
+    function Example(): null {
+      snapshot = useIncrementalFunnel({
+        storageKey: 'customer-funnel',
+        createSession
+      });
+      return null;
+    }
+
+    const previousWindow = globalThis.window;
+    // @ts-expect-error deleting test-only global
+    delete globalThis.window;
+    renderToString(createElement(Example));
+
+    expect(createSession).not.toHaveBeenCalled();
+    expect(snapshot?.sessionMetadata).toBeNull();
+    expect(snapshot?.sessionCreationStatus).toBe('idle');
+    expect(snapshot?.sessionCreationError).toBeNull();
 
     if (typeof previousWindow !== 'undefined') {
       globalThis.window = previousWindow;
