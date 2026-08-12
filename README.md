@@ -1,6 +1,6 @@
 # react-incremental-funnel
 
-TypeScript-first React package for building incremental funnel flows with a small public runtime API and exported types.
+TypeScript-first React package for building incremental funnel flows with a small runtime API and exported types.
 
 ## Installation
 
@@ -8,110 +8,241 @@ TypeScript-first React package for building incremental funnel flows with a smal
 npm install react-incremental-funnel
 ```
 
-## Usage
+## Basic hook usage
 
-```ts
-import {
-  createFunnel,
-  advanceFunnel,
-  createMemoryStorageAdapter,
-  type FunnelStep
-} from 'react-incremental-funnel';
-
-const steps: FunnelStep<'welcome' | 'details' | 'confirm'>[] = [
-  { id: 'welcome', label: 'Welcome' },
-  { id: 'details', label: 'Details' },
-  { id: 'confirm', label: 'Confirm' }
-];
-
-const initial = createFunnel(steps);
-const next = advanceFunnel(initial, 'details');
-
-// in React components
+```tsx
 import { useIncrementalFunnel } from 'react-incremental-funnel';
 
-type CustomerFunnelValues = {
-  funnelVariant?: string;
-  services?: string[];
-  customer?: {
-    email?: string;
-    address?: string;
-  };
-  dementiaQuestionnaire?: string;
+type FunnelValues = {
+  fullName?: string;
+  email?: string;
+  consent?: boolean;
 };
 
-const funnel = useIncrementalFunnel<CustomerFunnelValues>({
-  storageKey: 'customer-funnel',
-  validateStep: async (stepId, values) => {
-    return validateCustomerStep(stepId, values);
-  },
-  validateAll: async values => {
-    return validateCustomerSubmission(values);
-  },
-  createSession: async () => {
-    return api.createDraftSession();
-  },
-  submitRemote: async values => {
-    await api.submitFunnel(values);
-  },
-  storageAdapters: {
-    // Optional: swap any built-in adapter with a custom one
-    memory: createMemoryStorageAdapter()
-  },
-  steps: ['welcome', 'details', 'confirm'],
-  fieldPolicies: {
-    funnelVariant: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 },
-    services: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 },
-    'customer.email': { persist: 'session', ttlMs: 2 * 60 * 60 * 1000 },
-    'customer.address': { persist: 'never' },
-    dementiaQuestionnaire: { persist: 'remoteOnly' }
-  },
-  persistStepState: true,
-  includeStepStateInRemoteUpdate: true
-});
+export function BasicFunnel() {
+  const funnel = useIncrementalFunnel<FunnelValues>({
+    storageKey: 'example-funnel',
+    steps: ['start', 'details', 'review']
+  });
 
-funnel.updateValues({ email: 'hello@example.com' });
-funnel.nextStep();
-funnel.markStepComplete('welcome');
-funnel.markSubmitted();
-await funnel.submit();
-funnel.clearValues();
-
-if (funnel.savedProgressExists) {
-  if (funnel.savedProgressIsStale) {
-    funnel.startAgain();
-  } else {
-    funnel.continueSavedProgress();
-  }
+  return (
+    <button
+      onClick={() => {
+        funnel.updateValues({ consent: true });
+        funnel.nextStep();
+      }}
+    >
+      Continue
+    </button>
+  );
 }
-
-if (funnel.submitStatus === 'failed') {
-  console.error(funnel.submitError);
-}
-
-if (!funnel.canContinueCurrentStep) {
-  console.error(funnel.currentStepValidationErrors, funnel.fieldValidationErrors);
-}
-
-// clears persisted progress only
-funnel.clearSavedProgress();
 ```
 
-### Lifecycle callbacks
+## Example integration (mock endpoints only)
 
-`useIncrementalFunnel` exposes optional lifecycle callbacks for funnel analytics and attribution.
-Callbacks receive safe metadata by default and only include full funnel values when
-`includeValuesInLifecycleCallbacks` is enabled.
+```tsx
+import { useIncrementalFunnel } from 'react-incremental-funnel';
+
+type FunnelValues = {
+  fullName?: string;
+  email?: string;
+  consent?: boolean;
+};
+
+const mockApi = {
+  async createSession() {
+    return { sessionId: 'mock-session-id' };
+  },
+  async saveProgress(values: Partial<FunnelValues>) {
+    await fetch('/mock/funnel/progress', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(values)
+    });
+  },
+  async submit(values: Partial<FunnelValues>) {
+    await fetch('/mock/funnel/submit', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(values)
+    });
+  }
+};
+
+export function FunnelWithMockApi() {
+  const funnel = useIncrementalFunnel<
+    FunnelValues,
+    'start' | 'details' | 'review'
+  >({
+    storageKey: 'example-funnel',
+    steps: ['start', 'details', 'review'],
+    createSession: () => mockApi.createSession(),
+    updateRemote: values => mockApi.saveProgress(values),
+    submitRemote: values => mockApi.submit(values)
+  });
+
+  return <button onClick={() => void funnel.submit()}>Submit</button>;
+}
+```
+
+## Step orchestration
+
+Use these APIs to control progress through your funnel:
+
+- `nextStep()` / `previousStep()` to move through `steps`
+- `goToStep(stepId)` to jump to a specific step
+- `markStepComplete(stepId)` / `markStepIncomplete(stepId)` for explicit completion state
+- `currentStepId`, `completedStepIds`, `canGoNext`, and `canGoBack` for UI guards
+- `persistStepState: true` to persist step position across sessions
+- `includeStepStateInRemoteUpdate: true` to include step state in remote updates
+
+## Field-level persistence policies
+
+Use `fieldPolicies` to control where each field can persist:
+
+- `local`: persist in local storage
+- `session`: persist in session storage
+- `memory`: persist in memory only
+- `never`: never persist
+- `remoteOnly`: never persist locally, include only in remote updates/submission
+
+`ttlMs` can be added per field to expire persisted values automatically.
 
 ```ts
-useIncrementalFunnel({
-  storageKey: 'customer-funnel',
-  onStepCompleted: ({ step }) => {
-    analytics.track('Funnel Step Completed', { step });
-  },
-  includeValuesInLifecycleCallbacks: true
-});
+fieldPolicies: {
+  fullName: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 },
+  email: { persist: 'session', ttlMs: 2 * 60 * 60 * 1000 },
+  consent: { persist: 'memory' },
+  temporaryInput: { persist: 'never' },
+  sensitiveDraft: { persist: 'remoteOnly' }
+}
 ```
+
+## Storage adapters
+
+Built-in adapters:
+
+- `createLocalStorageAdapter()`
+- `createSessionStorageAdapter()`
+- `createMemoryStorageAdapter()`
+
+Override any adapter with `storageAdapters`:
+
+```ts
+storageAdapters: {
+  memory: createMemoryStorageAdapter();
+}
+```
+
+## Remote update callbacks
+
+Use `updateRemote(values)` (or `remoteUpdate({ values, stepState })`) to receive debounced in-progress updates.
+
+Pair with lifecycle callbacks:
+
+- `onRemoteUpdateSucceeded`
+- `onRemoteUpdateFailed`
+
+Inspect `remoteSyncStatus` and `lastSuccessfulRemoteSyncAt` to drive UI status.
+
+## Session creation callbacks
+
+Use `createSession()` to create a server-side draft/session at funnel start.
+
+Inspect session state with:
+
+- `sessionCreationStatus`
+- `sessionCreationError`
+- `sessionMetadata`
+
+## Submit callbacks
+
+Use `submitRemote(values)` for final submission and call `submit()` from the hook result.
+
+Inspect submit state with:
+
+- `submitStatus`
+- `submitError`
+
+Lifecycle callbacks for submission:
+
+- `onSubmitStarted`
+- `onSubmitSucceeded`
+- `onSubmitFailed`
+
+## Resume / start-again handling
+
+Use saved progress flags:
+
+- `savedProgressExists`
+- `savedProgressIsStale`
+- `savedProgressMetadata`
+
+Actions:
+
+- `continueSavedProgress()`
+- `startAgain()`
+- `clearSavedProgress()` (removes persisted progress only)
+
+## Validation callback usage
+
+Provide per-step and full-submit validation callbacks:
+
+```ts
+validateStep: async (stepId, values) => {
+  if (stepId === 'details' && !values.email) {
+    return {
+      stepErrors: ['Please complete this step'],
+      fieldErrors: { email: 'Email is required' }
+    };
+  }
+},
+validateAll: async values => {
+  if (!values.consent) {
+    return {
+      stepErrors: ['Please accept before submitting'],
+      fieldErrors: { consent: 'Consent is required' }
+    };
+  }
+}
+```
+
+Use `canContinueCurrentStep`, `currentStepValidationErrors`, and `fieldValidationErrors` in UI.
+
+## Lifecycle event callbacks
+
+You can subscribe to lifecycle events:
+
+- `onFunnelStarted`
+- `onStepStarted`
+- `onStepCompleted`
+- `onValuesChanged`
+- `onRemoteUpdateSucceeded`
+- `onRemoteUpdateFailed`
+- `onSubmitStarted`
+- `onSubmitSucceeded`
+- `onSubmitFailed`
+- `onFunnelReset`
+
+Set `includeValuesInLifecycleCallbacks: true` only when you explicitly need values payloads.
+
+## Shared/public device guidance
+
+For shared/public devices:
+
+- Prefer `session` or `memory` persistence over `local`
+- Use short `ttlMs` values for persisted fields
+- Mark sensitive fields as `never` or `remoteOnly`
+- Offer a visible “Start again” action that calls `startAgain()`
+- Offer a visible “Clear saved progress” action that calls `clearSavedProgress()`
+
+## Security and privacy guidance
+
+- Do not store secrets in funnel values.
+- Treat local/session storage as user-accessible and non-secret storage.
+- Persist only what is required; default sensitive fields to `never` or `remoteOnly`.
+- Redact or minimize telemetry in lifecycle callbacks unless required.
+- Validate and sanitize values server-side before trusting updates/submissions.
 
 ## Development
 
