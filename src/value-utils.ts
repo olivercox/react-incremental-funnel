@@ -40,6 +40,13 @@ function deleteValueAtPath(target: Record<string, unknown>, path: string): void 
   let current: Record<string, unknown> = target;
   for (let index = 0; index < segments.length - 1; index += 1) {
     const segment = segments[index]!;
+    if (
+      segment === '__proto__' ||
+      segment === 'prototype' ||
+      segment === 'constructor'
+    ) {
+      return;
+    }
     const next = current[segment];
     if (!isRecord(next)) {
       return;
@@ -48,6 +55,13 @@ function deleteValueAtPath(target: Record<string, unknown>, path: string): void 
   }
 
   const finalSegment = segments[segments.length - 1]!;
+  if (
+    finalSegment === '__proto__' ||
+    finalSegment === 'prototype' ||
+    finalSegment === 'constructor'
+  ) {
+    return;
+  }
   delete current[finalSegment];
 }
 
