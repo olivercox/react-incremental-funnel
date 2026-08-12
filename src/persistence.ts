@@ -2,7 +2,6 @@ export type FieldPersistenceMode =
   | 'local'
   | 'session'
   | 'memory'
-  | 'never'
   | 'remoteOnly';
 
 export interface FieldPersistencePolicy {
