@@ -30,13 +30,25 @@ const next = advanceFunnel(initial, 'details');
 import { useIncrementalFunnel } from 'react-incremental-funnel';
 
 type CustomerFunnelValues = {
-  email?: string;
-  firstName?: string;
+  funnelVariant?: string;
+  services?: string[];
+  customer?: {
+    email?: string;
+    address?: string;
+  };
+  dementiaQuestionnaire?: string;
 };
 
 const funnel = useIncrementalFunnel<CustomerFunnelValues>({
   storageKey: 'customer-funnel',
   steps: ['welcome', 'details', 'confirm'],
+  fieldPolicies: {
+    funnelVariant: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 },
+    services: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 },
+    'customer.email': { persist: 'session', ttlMs: 2 * 60 * 60 * 1000 },
+    'customer.address': { persist: 'never' },
+    dementiaQuestionnaire: { persist: 'remoteOnly' }
+  },
   persistStepState: true,
   includeStepStateInRemoteUpdate: true
 });

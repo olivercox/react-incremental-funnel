@@ -1,4 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  applyFieldStateForMode,
+  buildFieldStateForMode,
+  type FieldPersistencePolicies,
+  isRecord,
+  normalizeFieldPolicies,
+  readPersistedFieldState
+} from './persistence';
+export type {
+  FieldPersistenceMode,
+  FieldPersistencePolicies,
+  FieldPersistencePolicy
+} from './persistence';
 
 export type FunnelStepId = string;
 
@@ -57,6 +70,7 @@ export interface UseIncrementalFunnelOptions<
   TStepId extends FunnelStepId = FunnelStepId
 > {
   storageKey?: string;
+  fieldPolicies?: FieldPersistencePolicies;
   initialValues?: Partial<TValues>;
   steps?: readonly TStepId[];
   initialStepId?: TStepId;
@@ -101,15 +115,46 @@ export interface IncrementalFunnelRemoteUpdate<
   };
 }
 
-function canUseStorage(): boolean {
+interface PersistedStepState<TStepId extends FunnelStepId = FunnelStepId> {
+  currentStepId: TStepId | null;
+  completedStepIds: readonly TStepId[];
+}
+
+interface PersistedLocalEnvelope<TStepId extends FunnelStepId = FunnelStepId> {
+  fieldState?: Record<string, unknown>;
+  stepState?: PersistedStepState<TStepId>;
+  values?: Record<string, unknown>;
+}
+
+interface PersistedSessionEnvelope {
+  fieldState?: Record<string, unknown>;
+  values?: Record<string, unknown>;
+}
+
+const memoryFieldStateStore = new Map<string, Record<string, unknown>>();
+
+function canUseLocalStorage(): boolean {
   return (
     typeof window !== 'undefined' &&
     typeof window.localStorage !== 'undefined'
   );
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+function canUseSessionStorage(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    typeof window.sessionStorage !== 'undefined'
+  );
+}
+
+function isPersistedStepState<TStepId extends FunnelStepId>(
+  value: unknown
+): value is PersistedStepState<TStepId> {
+  return (
+    isRecord(value) &&
+    ('currentStepId' in value ? true : false) &&
+    Array.isArray(value.completedStepIds)
+  );
 }
 
 function areShallowEqualObjects(
@@ -134,6 +179,7 @@ export function useIncrementalFunnel<
 ): UseIncrementalFunnelResult<TValues, TStepId> {
   const {
     storageKey,
+    fieldPolicies,
     initialValues,
     steps: configuredSteps,
     initialStepId,
@@ -143,6 +189,10 @@ export function useIncrementalFunnel<
   } = options;
   const steps = useMemo(() => [...(configuredSteps ?? [])], [configuredSteps]);
   const stepIds = useMemo(() => new Set(steps), [steps]);
+  const normalizedPolicies = useMemo(
+    () => normalizeFieldPolicies(fieldPolicies),
+    [fieldPolicies]
+  );
 
   if (stepIds.size !== steps.length) {
     throw new Error('Funnel steps must have unique ids.');
@@ -187,61 +237,187 @@ export function useIncrementalFunnel<
   }, [initialCurrentStepId, stepIds]);
 
   useEffect(() => {
-    if (!storageKey || !canUseStorage()) {
+    if (
+      !storageKey ||
+      (!canUseLocalStorage() &&
+        !canUseSessionStorage() &&
+        !Object.values(normalizedPolicies).some(policy => policy.persist === 'memory'))
+    ) {
       setIsReady(true);
       return;
     }
 
     try {
-      const storedRaw = window.localStorage.getItem(storageKey);
-      if (!storedRaw) {
-        return;
-      }
+      const now = Date.now();
+      let didRestoreAnyProgress = false;
+      let nextValues = { ...resolvedInitialValues } as Record<string, unknown>;
+      let didPruneLocal = false;
+      let didPruneSession = false;
 
-      const parsedValues: unknown = JSON.parse(storedRaw);
-      if (!isRecord(parsedValues)) {
-        return;
-      }
+      const localEnvelope: PersistedLocalEnvelope<TStepId> = {};
+      if (canUseLocalStorage()) {
+        const storedRaw = window.localStorage.getItem(storageKey);
+        if (storedRaw) {
+          const parsedValues: unknown = JSON.parse(storedRaw);
+          if (isRecord(parsedValues)) {
+            const storedState = parsedValues as PersistedLocalEnvelope<TStepId>;
+            if (isPersistedStepState<TStepId>(storedState.stepState)) {
+              localEnvelope.stepState = storedState.stepState;
+            }
 
-      const storedState = parsedValues as Record<string, unknown>;
-      const hasStructuredState =
-        isRecord(storedState.values) && isRecord(storedState.stepState);
-
-      if (hasStructuredState) {
-        setValues(previousValues => ({
-          ...previousValues,
-          ...((storedState.values as Partial<TValues>) ?? {})
-        }) as Partial<TValues>);
-        if (persistStepState) {
-          const stepState = storedState.stepState as Record<string, unknown>;
-          const parsedCurrentStepId = stepState.currentStepId;
-          const parsedCompletedStepIds = stepState.completedStepIds;
-
-          if (
-            (parsedCurrentStepId === null ||
-              (typeof parsedCurrentStepId === 'string' &&
-                stepIds.has(parsedCurrentStepId as TStepId))) &&
-            Array.isArray(parsedCompletedStepIds)
-          ) {
-            setCurrentStepId(parsedCurrentStepId as TStepId | null);
-            setCompletedStepIds(
-              parsedCompletedStepIds.filter(
-                stepId =>
-                  typeof stepId === 'string' &&
-                  stepIds.has(stepId as TStepId)
-              ) as TStepId[]
+            const localFieldState = readPersistedFieldState(
+              isRecord(storedState.fieldState)
+                ? storedState.fieldState
+                : isRecord(storedState.values)
+                  ? storedState.values
+                  : isRecord(parsedValues)
+                    ? parsedValues
+                    : {}
             );
+            const localApplied = applyFieldStateForMode(
+              nextValues,
+              normalizedPolicies,
+              'local',
+              localFieldState,
+              now
+            );
+            nextValues = localApplied.nextValues;
+            if (Object.keys(localFieldState).length > 0) {
+              didRestoreAnyProgress = true;
+            }
+            if (localApplied.expiredPaths.length > 0) {
+              for (const path of localApplied.expiredPaths) {
+                delete localFieldState[path];
+              }
+              didPruneLocal = true;
+            }
+            localEnvelope.fieldState = localFieldState;
+
+            if (persistStepState && isPersistedStepState<TStepId>(storedState.stepState)) {
+              const stepState = storedState.stepState;
+              const parsedCurrentStepId = stepState.currentStepId;
+              const parsedCompletedStepIds = stepState.completedStepIds;
+
+              if (
+                (parsedCurrentStepId === null ||
+                  (typeof parsedCurrentStepId === 'string' &&
+                    stepIds.has(parsedCurrentStepId as TStepId))) &&
+                Array.isArray(parsedCompletedStepIds)
+              ) {
+                setCurrentStepId(parsedCurrentStepId as TStepId | null);
+                setCompletedStepIds(
+                  parsedCompletedStepIds.filter(
+                    stepId =>
+                      typeof stepId === 'string' &&
+                      stepIds.has(stepId as TStepId)
+                  ) as TStepId[]
+                );
+                didRestoreAnyProgress = true;
+              }
+            }
           }
         }
-        setHasSavedProgress(true);
-        return;
       }
 
-      if (isRecord(parsedValues)) {
-        setValues(previousValues => ({
-          ...previousValues,
-          ...(parsedValues as Partial<TValues>)
-        }) as Partial<TValues>);
+      if (canUseSessionStorage()) {
+        const sessionRaw = window.sessionStorage.getItem(storageKey);
+        if (sessionRaw) {
+          const parsedSession: unknown = JSON.parse(sessionRaw);
+          if (isRecord(parsedSession)) {
+            const sessionEnvelope = parsedSession as PersistedSessionEnvelope;
+            const sessionFieldState = readPersistedFieldState(
+              isRecord(sessionEnvelope.fieldState)
+                ? sessionEnvelope.fieldState
+                : isRecord(sessionEnvelope.values)
+                  ? sessionEnvelope.values
+                  : parsedSession
+            );
+            const sessionApplied = applyFieldStateForMode(
+              nextValues,
+              normalizedPolicies,
+              'session',
+              sessionFieldState,
+              now
+            );
+            nextValues = sessionApplied.nextValues;
+            if (Object.keys(sessionFieldState).length > 0) {
+              didRestoreAnyProgress = true;
+            }
+            if (sessionApplied.expiredPaths.length > 0) {
+              for (const path of sessionApplied.expiredPaths) {
+                delete sessionFieldState[path];
+              }
+              didPruneSession = true;
+            }
+
+            if (didPruneSession) {
+              if (Object.keys(sessionFieldState).length > 0) {
+                window.sessionStorage.setItem(
+                  storageKey,
+                  JSON.stringify({
+                    fieldState: sessionFieldState
+                  })
+                );
+              } else {
+                window.sessionStorage.removeItem(storageKey);
+              }
+            }
+          }
+        }
+      }
+
+      const memoryFieldState =
+        (memoryFieldStateStore.get(storageKey) ?? {}) as Record<string, unknown>;
+      if (Object.keys(memoryFieldState).length > 0) {
+        const parsedMemoryFieldState = readPersistedFieldState(memoryFieldState);
+        const memoryApplied = applyFieldStateForMode(
+          nextValues,
+          normalizedPolicies,
+          'memory',
+          parsedMemoryFieldState,
+          now
+        );
+        nextValues = memoryApplied.nextValues;
+        if (Object.keys(parsedMemoryFieldState).length > 0) {
+          didRestoreAnyProgress = true;
+        }
+        if (memoryApplied.expiredPaths.length > 0) {
+          for (const path of memoryApplied.expiredPaths) {
+            delete parsedMemoryFieldState[path];
+          }
+          if (Object.keys(parsedMemoryFieldState).length > 0) {
+            memoryFieldStateStore.set(storageKey, parsedMemoryFieldState);
+          } else {
+            memoryFieldStateStore.delete(storageKey);
+          }
+        }
+      }
+
+      if (didPruneLocal && canUseLocalStorage()) {
+        const hasStepState =
+          persistStepState &&
+          isRecord(localEnvelope.stepState) &&
+          Array.isArray(localEnvelope.stepState.completedStepIds);
+        if (
+          Object.keys(localEnvelope.fieldState ?? {}).length === 0 &&
+          !hasStepState
+        ) {
+          window.localStorage.removeItem(storageKey);
+        } else {
+          window.localStorage.setItem(
+            storageKey,
+            JSON.stringify({
+              ...(Object.keys(localEnvelope.fieldState ?? {}).length > 0
+                ? { fieldState: localEnvelope.fieldState }
+                : {}),
+              ...(hasStepState ? { stepState: localEnvelope.stepState } : {})
+            })
+          );
+        }
+      }
+
+      setValues(nextValues as Partial<TValues>);
+      if (didRestoreAnyProgress) {
         setHasSavedProgress(true);
       }
     } catch {
@@ -249,37 +425,89 @@ export function useIncrementalFunnel<
     } finally {
       setIsReady(true);
     }
-  }, [persistStepState, stepIds, storageKey]);
+  }, [
+    normalizedPolicies,
+    persistStepState,
+    resolvedInitialValues,
+    stepIds,
+    storageKey
+  ]);
 
   useEffect(() => {
-    if (!storageKey || !isReady || !canUseStorage()) {
+    if (!storageKey || !isReady) {
       return;
     }
 
     try {
-      if (
-        Object.keys(values).length === 0 &&
-        (!persistStepState ||
-          (completedStepIds.length === 0 &&
-            Object.is(currentStepId, initialCurrentStepId)))
-      ) {
-        window.localStorage.removeItem(storageKey);
-        setHasSavedProgress(false);
-        return;
+      const now = Date.now();
+      const localFieldState = buildFieldStateForMode(
+        values as Record<string, unknown>,
+        normalizedPolicies,
+        'local',
+        now
+      );
+      const sessionFieldState = buildFieldStateForMode(
+        values as Record<string, unknown>,
+        normalizedPolicies,
+        'session',
+        now
+      );
+      const memoryFieldState = buildFieldStateForMode(
+        values as Record<string, unknown>,
+        normalizedPolicies,
+        'memory',
+        now
+      );
+
+      if (Object.keys(memoryFieldState).length > 0) {
+        memoryFieldStateStore.set(storageKey, memoryFieldState);
+      } else {
+        memoryFieldStateStore.delete(storageKey);
       }
 
-      const payload = persistStepState
-        ? {
-            values,
-            stepState: {
-              currentStepId,
-              completedStepIds
+      const shouldPersistStepState =
+        persistStepState &&
+        (completedStepIds.length > 0 || !Object.is(currentStepId, initialCurrentStepId));
+      const localPayload = {
+        ...(Object.keys(localFieldState).length > 0
+          ? { fieldState: localFieldState }
+          : {}),
+        ...(shouldPersistStepState
+          ? {
+              stepState: {
+                currentStepId,
+                completedStepIds
+              }
             }
-          }
-        : values;
+          : {})
+      };
 
-      window.localStorage.setItem(storageKey, JSON.stringify(payload));
-      setHasSavedProgress(true);
+      if (canUseLocalStorage()) {
+        if (Object.keys(localPayload).length === 0) {
+          window.localStorage.removeItem(storageKey);
+        } else {
+          window.localStorage.setItem(storageKey, JSON.stringify(localPayload));
+        }
+      }
+
+      if (canUseSessionStorage()) {
+        if (Object.keys(sessionFieldState).length === 0) {
+          window.sessionStorage.removeItem(storageKey);
+        } else {
+          window.sessionStorage.setItem(
+            storageKey,
+            JSON.stringify({
+              fieldState: sessionFieldState
+            })
+          );
+        }
+      }
+
+      setHasSavedProgress(
+        Object.keys(localPayload).length > 0 ||
+          Object.keys(sessionFieldState).length > 0 ||
+          Object.keys(memoryFieldState).length > 0
+      );
     } catch {
       return;
     }
@@ -288,6 +516,7 @@ export function useIncrementalFunnel<
     currentStepId,
     initialCurrentStepId,
     isReady,
+    normalizedPolicies,
     persistStepState,
     storageKey,
     values
