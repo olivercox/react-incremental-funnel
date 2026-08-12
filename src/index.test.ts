@@ -86,6 +86,9 @@ describe('useIncrementalFunnel', () => {
     expect(snapshot?.sessionCreationError).toBeNull();
     expect(snapshot?.submitStatus).toBe('idle');
     expect(snapshot?.submitError).toBeNull();
+    expect(snapshot?.currentStepValidationErrors).toEqual([]);
+    expect(snapshot?.fieldValidationErrors).toEqual({});
+    expect(snapshot?.canContinueCurrentStep).toBe(true);
   });
 
   it('updates partial values', () => {
@@ -317,6 +320,53 @@ describe('useIncrementalFunnel', () => {
     expect(snapshot?.canGoNext).toBe(true);
   });
 
+  it('supports step-level validation callbacks', () => {
+    type FunnelValues = {
+      email?: string;
+    };
+    const validateStep = vi.fn((stepId: string | null, values: FunnelValues) => {
+      if (stepId === 'services' && !values.email) {
+        return {
+          stepErrors: ['Email is required'],
+          fieldErrors: { email: 'Email is required' }
+        };
+      }
+      return undefined;
+    });
+    let snapshot:
+      | ReturnType<
+          typeof useIncrementalFunnel<FunnelValues, 'services' | 'availability'>
+        >
+      | undefined;
+
+    function Example(): null {
+      const didUpdateRef = useRef(false);
+      const funnel = useIncrementalFunnel<FunnelValues, 'services' | 'availability'>(
+        {
+          steps: ['services', 'availability'] as const,
+          validateStep
+        }
+      );
+
+      if (!didUpdateRef.current) {
+        didUpdateRef.current = true;
+        funnel.updateValues({ email: '' });
+      }
+
+      snapshot = funnel;
+      return null;
+    }
+
+    renderToString(createElement(Example));
+
+    expect(validateStep).toHaveBeenCalledWith('services', { email: '' });
+    expect(snapshot?.currentStepValidationErrors).toEqual(['Email is required']);
+    expect(snapshot?.fieldValidationErrors).toEqual({
+      email: 'Email is required'
+    });
+    expect(snapshot?.canContinueCurrentStep).toBe(false);
+  });
+
   it('can move to previous and specific steps', () => {
     let snapshot:
       | ReturnType<
@@ -522,6 +572,37 @@ describe('useIncrementalFunnel', () => {
     await snapshot?.flushRemoteUpdates();
 
     expect(updates).toEqual([]);
+  });
+
+  it('supports all-step validation callback before submit', async () => {
+    type FunnelValues = {
+      email?: string;
+    };
+    const validateAll = vi.fn(() => ({
+      stepErrors: ['Cannot submit yet'],
+      fieldErrors: { email: 'Email is required' }
+    }));
+    const submitRemote = vi.fn(async () => undefined);
+    let snapshot:
+      | ReturnType<typeof useIncrementalFunnel<FunnelValues>>
+      | undefined;
+
+    function Example(): null {
+      snapshot = useIncrementalFunnel<FunnelValues>({
+        validateAll,
+        submitRemote
+      });
+      return null;
+    }
+
+    renderToString(createElement(Example));
+    await expect(snapshot?.submit()).rejects.toEqual({
+      stepErrors: ['Cannot submit yet'],
+      fieldErrors: { email: 'Email is required' }
+    });
+
+    expect(validateAll).toHaveBeenCalledTimes(1);
+    expect(submitRemote).not.toHaveBeenCalled();
   });
 
   it('supports debounced remote updates', async () => {

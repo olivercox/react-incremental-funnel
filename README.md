@@ -42,6 +42,12 @@ type CustomerFunnelValues = {
 
 const funnel = useIncrementalFunnel<CustomerFunnelValues>({
   storageKey: 'customer-funnel',
+  validateStep: async (stepId, values) => {
+    return validateCustomerStep(stepId, values);
+  },
+  validateAll: async values => {
+    return validateCustomerSubmission(values);
+  },
   createSession: async () => {
     return api.createDraftSession();
   },
@@ -81,6 +87,10 @@ if (funnel.savedProgressExists) {
 
 if (funnel.submitStatus === 'failed') {
   console.error(funnel.submitError);
+}
+
+if (!funnel.canContinueCurrentStep) {
+  console.error(funnel.currentStepValidationErrors, funnel.fieldValidationErrors);
 }
 
 // clears persisted progress only
