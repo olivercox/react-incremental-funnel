@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   applyFieldStateForMode,
   buildFieldStateForMode,
@@ -88,11 +88,20 @@ export interface UseIncrementalFunnelOptions<
   initialStepId?: TStepId;
   persistStepState?: boolean;
   includeStepStateInRemoteUpdate?: boolean;
+  debounceMs?: number;
   storageAdapters?: Partial<Record<'local' | 'session' | 'memory', StorageAdapter>>;
+  updateRemote?: (values: Partial<TValues>) => void | Promise<void>;
   remoteUpdate?: (
     update: IncrementalFunnelRemoteUpdate<TValues, TStepId>
-  ) => void;
+  ) => void | Promise<void>;
 }
+
+export type RemoteSyncStatus =
+  | 'idle'
+  | 'pending'
+  | 'syncing'
+  | 'synced'
+  | 'failed';
 
 export interface UseIncrementalFunnelResult<
   TValues extends Record<string, unknown>,
@@ -103,6 +112,8 @@ export interface UseIncrementalFunnelResult<
   isDirty: boolean;
   isSubmitted: boolean;
   hasSavedProgress: boolean;
+  remoteSyncStatus: RemoteSyncStatus;
+  lastSuccessfulRemoteSyncAt: number | null;
   currentStepId: TStepId | null;
   completedStepIds: readonly TStepId[];
   canGoNext: boolean;
@@ -115,6 +126,8 @@ export interface UseIncrementalFunnelResult<
   previousStep: () => void;
   markStepComplete: (stepId: TStepId) => void;
   markStepIncomplete: (stepId: TStepId) => void;
+  flushRemoteUpdates: () => Promise<void>;
+  retryRemoteUpdates: () => Promise<void>;
 }
 
 export interface IncrementalFunnelRemoteUpdate<
@@ -186,7 +199,9 @@ export function useIncrementalFunnel<
     initialStepId,
     persistStepState = false,
     includeStepStateInRemoteUpdate = false,
+    debounceMs = 0,
     storageAdapters,
+    updateRemote,
     remoteUpdate
   } = options;
   const steps = useMemo(() => [...(configuredSteps ?? [])], [configuredSteps]);
@@ -233,6 +248,19 @@ export function useIncrementalFunnel<
   );
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [hasSavedProgress, setHasSavedProgress] = useState(false);
+  const [remoteSyncStatus, setRemoteSyncStatus] =
+    useState<RemoteSyncStatus>('idle');
+  const [lastSuccessfulRemoteSyncAt, setLastSuccessfulRemoteSyncAt] =
+    useState<number | null>(null);
+  const pendingRemoteValuesRef = useRef<Partial<TValues>>({});
+  const pendingRemoteStepStateRef = useRef<PersistedStepState<TStepId> | null>(
+    null
+  );
+  const remoteSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const remoteSyncInFlightRef = useRef<Promise<void> | null>(null);
+  const currentStepIdRef = useRef<TStepId | null>(initialCurrentStepId);
+  const completedStepIdsRef = useRef<TStepId[]>([]);
+  const resolvedRemoteUpdate = updateRemote ?? remoteUpdate;
 
   useEffect(() => {
     setValues(resolvedInitialValues);
@@ -527,17 +555,186 @@ export function useIncrementalFunnel<
     values
   ]);
 
-  const updateValues = useCallback((nextValues: Partial<TValues>) => {
-    setValues(
-      previousValues => ({ ...previousValues, ...nextValues }) as Partial<TValues>
+  useEffect(() => {
+    currentStepIdRef.current = currentStepId;
+  }, [currentStepId]);
+
+  useEffect(() => {
+    completedStepIdsRef.current = [...completedStepIds];
+  }, [completedStepIds]);
+
+  const hasPendingRemoteSync = useCallback(() => {
+    return (
+      Object.keys(pendingRemoteValuesRef.current as Record<string, unknown>).length > 0 ||
+      (includeStepStateInRemoteUpdate && pendingRemoteStepStateRef.current !== null)
     );
-    setIsSubmitted(false);
-  }, []);
+  }, [includeStepStateInRemoteUpdate]);
+
+  const flushRemoteUpdates = useCallback(async () => {
+    if (!resolvedRemoteUpdate) {
+      return;
+    }
+
+    if (remoteSyncTimerRef.current) {
+      clearTimeout(remoteSyncTimerRef.current);
+      remoteSyncTimerRef.current = null;
+    }
+
+    if (remoteSyncInFlightRef.current) {
+      await remoteSyncInFlightRef.current;
+    }
+
+    if (!hasPendingRemoteSync()) {
+      return;
+    }
+
+    const pendingValues = pendingRemoteValuesRef.current;
+    const pendingStepState = pendingRemoteStepStateRef.current;
+    pendingRemoteValuesRef.current = {} as Partial<TValues>;
+    pendingRemoteStepStateRef.current = null;
+    setRemoteSyncStatus('syncing');
+
+    const syncPromise = (async () => {
+      try {
+        if (updateRemote) {
+          await updateRemote(pendingValues);
+        } else if (remoteUpdate) {
+          await remoteUpdate({
+            values: pendingValues,
+            ...(includeStepStateInRemoteUpdate && pendingStepState
+              ? { stepState: pendingStepState }
+              : {})
+          });
+        }
+
+        setLastSuccessfulRemoteSyncAt(Date.now());
+        setRemoteSyncStatus(hasPendingRemoteSync() ? 'pending' : 'synced');
+
+        if (hasPendingRemoteSync()) {
+          if (debounceMs > 0) {
+            remoteSyncTimerRef.current = setTimeout(() => {
+              void flushRemoteUpdates();
+            }, debounceMs);
+          } else {
+            void flushRemoteUpdates();
+          }
+        }
+      } catch {
+        pendingRemoteValuesRef.current = {
+          ...(pendingValues as Record<string, unknown>),
+          ...(pendingRemoteValuesRef.current as Record<string, unknown>)
+        } as Partial<TValues>;
+        if (
+          includeStepStateInRemoteUpdate &&
+          pendingStepState &&
+          pendingRemoteStepStateRef.current === null
+        ) {
+          pendingRemoteStepStateRef.current = pendingStepState;
+        }
+        setRemoteSyncStatus('failed');
+      }
+    })();
+
+    remoteSyncInFlightRef.current = syncPromise.finally(() => {
+      remoteSyncInFlightRef.current = null;
+    });
+
+    await remoteSyncInFlightRef.current;
+  }, [
+    debounceMs,
+    hasPendingRemoteSync,
+    includeStepStateInRemoteUpdate,
+    remoteUpdate,
+    resolvedRemoteUpdate,
+    updateRemote
+  ]);
+
+  const queueRemoteUpdate = useCallback(
+    (partialValues: Partial<TValues>, nextStepState?: PersistedStepState<TStepId>) => {
+      if (!resolvedRemoteUpdate) {
+        return;
+      }
+
+      if (Object.keys(partialValues as Record<string, unknown>).length > 0) {
+        pendingRemoteValuesRef.current = {
+          ...(pendingRemoteValuesRef.current as Record<string, unknown>),
+          ...(partialValues as Record<string, unknown>)
+        } as Partial<TValues>;
+      }
+
+      if (includeStepStateInRemoteUpdate && nextStepState) {
+        pendingRemoteStepStateRef.current = nextStepState;
+      }
+
+      if (!hasPendingRemoteSync()) {
+        return;
+      }
+
+      if (remoteSyncStatus !== 'syncing') {
+        setRemoteSyncStatus('pending');
+      }
+
+      if (remoteSyncTimerRef.current) {
+        clearTimeout(remoteSyncTimerRef.current);
+      }
+
+      if (debounceMs > 0) {
+        remoteSyncTimerRef.current = setTimeout(() => {
+          void flushRemoteUpdates();
+        }, debounceMs);
+      } else {
+        void flushRemoteUpdates();
+      }
+    },
+    [
+      debounceMs,
+      flushRemoteUpdates,
+      hasPendingRemoteSync,
+      includeStepStateInRemoteUpdate,
+      remoteSyncStatus,
+      resolvedRemoteUpdate
+    ]
+  );
+
+  const retryRemoteUpdates = useCallback(async () => {
+    if (!resolvedRemoteUpdate || !hasPendingRemoteSync()) {
+      return;
+    }
+
+    await flushRemoteUpdates();
+  }, [flushRemoteUpdates, hasPendingRemoteSync, resolvedRemoteUpdate]);
+
+  useEffect(
+    () => () => {
+      if (remoteSyncTimerRef.current) {
+        clearTimeout(remoteSyncTimerRef.current);
+      }
+    },
+    []
+  );
+
+  const updateValues = useCallback(
+    (nextValues: Partial<TValues>) => {
+      setValues(
+        previousValues => ({ ...previousValues, ...nextValues }) as Partial<TValues>
+      );
+      setIsSubmitted(false);
+      queueRemoteUpdate(nextValues, {
+        currentStepId: currentStepIdRef.current,
+        completedStepIds: completedStepIdsRef.current
+      });
+    },
+    [queueRemoteUpdate]
+  );
 
   const clearValues = useCallback(() => {
     setValues(resolvedInitialValues);
     setIsSubmitted(false);
-  }, [resolvedInitialValues]);
+    queueRemoteUpdate(resolvedInitialValues, {
+      currentStepId: currentStepIdRef.current,
+      completedStepIds: completedStepIdsRef.current
+    });
+  }, [queueRemoteUpdate, resolvedInitialValues]);
 
   const markSubmitted = useCallback(() => {
     setIsSubmitted(true);
@@ -549,8 +746,12 @@ export function useIncrementalFunnel<
         throw new Error('Step id must exist in steps.');
       }
       setCurrentStepId(stepId);
+      queueRemoteUpdate({} as Partial<TValues>, {
+        currentStepId: stepId,
+        completedStepIds: completedStepIdsRef.current
+      });
     },
-    [stepIds]
+    [queueRemoteUpdate, stepIds]
   );
 
   const nextStep = useCallback(() => {
@@ -564,9 +765,14 @@ export function useIncrementalFunnel<
         return previousStepId;
       }
 
-      return steps[previousIndex + 1] as TStepId;
+      const nextStepId = steps[previousIndex + 1] as TStepId;
+      queueRemoteUpdate({} as Partial<TValues>, {
+        currentStepId: nextStepId,
+        completedStepIds: completedStepIdsRef.current
+      });
+      return nextStepId;
     });
-  }, [steps]);
+  }, [queueRemoteUpdate, steps]);
 
   const previousStep = useCallback(() => {
     setCurrentStepId(previousStepId => {
@@ -579,20 +785,32 @@ export function useIncrementalFunnel<
         return previousStepId;
       }
 
-      return steps[previousIndex - 1] as TStepId;
+      const nextStepId = steps[previousIndex - 1] as TStepId;
+      queueRemoteUpdate({} as Partial<TValues>, {
+        currentStepId: nextStepId,
+        completedStepIds: completedStepIdsRef.current
+      });
+      return nextStepId;
     });
-  }, [steps]);
+  }, [queueRemoteUpdate, steps]);
 
   const markStepComplete = useCallback(
     (stepId: TStepId) => {
       if (!stepIds.has(stepId)) {
         throw new Error('Step id must exist in steps.');
       }
-      setCompletedStepIds(previous =>
-        previous.includes(stepId) ? previous : [...previous, stepId]
-      );
+      setCompletedStepIds(previous => {
+        const nextCompletedIds = previous.includes(stepId)
+          ? previous
+          : [...previous, stepId];
+        queueRemoteUpdate({} as Partial<TValues>, {
+          currentStepId: currentStepIdRef.current,
+          completedStepIds: nextCompletedIds
+        });
+        return nextCompletedIds;
+      });
     },
-    [stepIds]
+    [queueRemoteUpdate, stepIds]
   );
 
   const markStepIncomplete = useCallback(
@@ -600,9 +818,16 @@ export function useIncrementalFunnel<
       if (!stepIds.has(stepId)) {
         throw new Error('Step id must exist in steps.');
       }
-      setCompletedStepIds(previous => previous.filter(id => id !== stepId));
+      setCompletedStepIds(previous => {
+        const nextCompletedIds = previous.filter(id => id !== stepId);
+        queueRemoteUpdate({} as Partial<TValues>, {
+          currentStepId: currentStepIdRef.current,
+          completedStepIds: nextCompletedIds
+        });
+        return nextCompletedIds;
+      });
     },
-    [stepIds]
+    [queueRemoteUpdate, stepIds]
   );
 
   const isDirty = useMemo(
@@ -622,36 +847,14 @@ export function useIncrementalFunnel<
   const canGoNext = currentStepIndex >= 0 && currentStepIndex < steps.length - 1;
   const canGoBack = currentStepIndex > 0;
 
-  useEffect(() => {
-    if (!remoteUpdate) {
-      return;
-    }
-
-    remoteUpdate({
-      values,
-      ...(includeStepStateInRemoteUpdate
-        ? {
-            stepState: {
-              currentStepId,
-              completedStepIds
-            }
-          }
-        : {})
-    });
-  }, [
-    completedStepIds,
-    currentStepId,
-    includeStepStateInRemoteUpdate,
-    remoteUpdate,
-    values
-  ]);
-
   return {
     values,
     isReady,
     isDirty,
     isSubmitted,
     hasSavedProgress,
+    remoteSyncStatus,
+    lastSuccessfulRemoteSyncAt,
     currentStepId,
     completedStepIds,
     canGoNext,
@@ -663,6 +866,8 @@ export function useIncrementalFunnel<
     nextStep,
     previousStep,
     markStepComplete,
-    markStepIncomplete
+    markStepIncomplete,
+    flushRemoteUpdates,
+    retryRemoteUpdates
   };
 }

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createElement, useRef } from 'react';
 // @ts-expect-error repository does not currently include @types/react-dom
 import { renderToString } from 'react-dom/server';
@@ -283,5 +283,171 @@ describe('useIncrementalFunnel', () => {
     expect(() => renderToString(createElement(Example))).toThrowError(
       'Step id must exist in steps.'
     );
+  });
+
+  it('flushes partial remote updates via updateRemote', async () => {
+    type FunnelValues = {
+      email?: string;
+      firstName?: string;
+    };
+    const updates: Partial<FunnelValues>[] = [];
+    let snapshot:
+      | ReturnType<typeof useIncrementalFunnel<FunnelValues>>
+      | undefined;
+
+    function Example(): null {
+      const didUpdateRef = useRef(false);
+      const funnel = useIncrementalFunnel<FunnelValues>({
+        updateRemote: async values => {
+          updates.push(values);
+        }
+      });
+
+      if (!didUpdateRef.current) {
+        didUpdateRef.current = true;
+        funnel.updateValues({ email: 'hello@example.com' });
+      }
+
+      snapshot = funnel;
+      return null;
+    }
+
+    renderToString(createElement(Example));
+    await snapshot?.flushRemoteUpdates();
+
+    expect(updates).toEqual([{ email: 'hello@example.com' }]);
+  });
+
+  it('supports debounced remote updates', async () => {
+    type FunnelValues = {
+      email?: string;
+      firstName?: string;
+    };
+    vi.useFakeTimers();
+    const updates: Partial<FunnelValues>[] = [];
+
+    function Example(): null {
+      const didUpdateRef = useRef(false);
+      const funnel = useIncrementalFunnel<FunnelValues>({
+        updateRemote: async values => {
+          updates.push(values);
+        },
+        debounceMs: 500
+      });
+
+      if (!didUpdateRef.current) {
+        didUpdateRef.current = true;
+        funnel.updateValues({ email: 'hello@example.com' });
+        funnel.updateValues({ firstName: 'Ada' });
+      }
+
+      return null;
+    }
+
+    try {
+      renderToString(createElement(Example));
+
+      expect(updates).toEqual([]);
+
+      await vi.advanceTimersByTimeAsync(500);
+      await Promise.resolve();
+
+      expect(updates).toEqual([{ email: 'hello@example.com', firstName: 'Ada' }]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('supports retrying failed remote updates', async () => {
+    type FunnelValues = {
+      email?: string;
+    };
+    let attempt = 0;
+    let snapshot:
+      | ReturnType<typeof useIncrementalFunnel<FunnelValues>>
+      | undefined;
+
+    function Example(): null {
+      const didUpdateRef = useRef(false);
+      const funnel = useIncrementalFunnel<FunnelValues>({
+        updateRemote: async () => {
+          attempt += 1;
+          if (attempt === 1) {
+            throw new Error('transient');
+          }
+        }
+      });
+
+      if (!didUpdateRef.current) {
+        didUpdateRef.current = true;
+        funnel.updateValues({ email: 'hello@example.com' });
+      }
+
+      snapshot = funnel;
+      return null;
+    }
+
+    renderToString(createElement(Example));
+    await snapshot?.flushRemoteUpdates();
+    await snapshot?.retryRemoteUpdates();
+
+    expect(attempt).toBe(2);
+  });
+
+  it('keeps legacy remoteUpdate payload shape', async () => {
+    type FunnelValues = {
+      email?: string;
+    };
+    const updates: Array<{
+      values: Partial<FunnelValues>;
+      stepState?: {
+        currentStepId: 'services' | 'availability' | null;
+        completedStepIds: readonly ('services' | 'availability')[];
+      };
+    }> = [];
+    let snapshot:
+      | ReturnType<
+          typeof useIncrementalFunnel<
+            FunnelValues,
+            'services' | 'availability'
+          >
+        >
+      | undefined;
+
+    function Example(): null {
+      const didUpdateRef = useRef(false);
+      const funnel = useIncrementalFunnel<FunnelValues, 'services' | 'availability'>(
+        {
+          steps: ['services', 'availability'] as const,
+          includeStepStateInRemoteUpdate: true,
+          debounceMs: 500,
+          remoteUpdate: update => {
+            updates.push(update);
+          }
+        }
+      );
+
+      if (!didUpdateRef.current) {
+        didUpdateRef.current = true;
+        funnel.updateValues({ email: 'hello@example.com' });
+        funnel.nextStep();
+      }
+
+      snapshot = funnel;
+      return null;
+    }
+
+    renderToString(createElement(Example));
+    await snapshot?.flushRemoteUpdates();
+
+    expect(updates).toEqual([
+      {
+        values: { email: 'hello@example.com' },
+        stepState: {
+          currentStepId: 'availability',
+          completedStepIds: []
+        }
+      }
+    ]);
   });
 });
