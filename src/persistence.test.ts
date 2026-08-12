@@ -22,7 +22,7 @@ describe('field persistence policies', () => {
       funnelVariant: { persist: 'local' },
       services: { persist: 'local' },
       'customer.email': { persist: 'session' },
-      'customer.address': { persist: 'never' },
+      'customer.address': { persist: 'memory' },
       dementiaQuestionnaire: { persist: 'remoteOnly' }
     });
 
@@ -32,7 +32,7 @@ describe('field persistence policies', () => {
 
     expect(Object.keys(localState)).toEqual(['funnelVariant', 'services']);
     expect(Object.keys(sessionState)).toEqual(['customer.email']);
-    expect(Object.keys(memoryState)).toEqual([]);
+    expect(Object.keys(memoryState)).toEqual(['customer.address']);
   });
 
   it('supports nested field paths and TTL expiry', () => {

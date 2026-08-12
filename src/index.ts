@@ -611,7 +611,7 @@ export function useIncrementalFunnel<
       !storageKey ||
       (!persistStepState &&
         Object.values(normalizedPolicies).every(
-          policy => policy.persist === 'never' || policy.persist === 'remoteOnly'
+          policy => policy.persist === 'remoteOnly'
         ))
     ) {
       setIsReady(true);

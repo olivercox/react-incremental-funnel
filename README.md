@@ -103,7 +103,6 @@ Use `fieldPolicies` to control where each field can persist:
 - `local`: persist in local storage
 - `session`: persist in session storage
 - `memory`: persist in memory only
-- `never`: never persist
 - `remoteOnly`: never persist locally, include only in remote updates/submission
 
 `ttlMs` can be added per field to expire persisted values automatically.
@@ -113,7 +112,7 @@ fieldPolicies: {
   fullName: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 },
   email: { persist: 'session', ttlMs: 2 * 60 * 60 * 1000 },
   consent: { persist: 'memory' },
-  temporaryInput: { persist: 'never' },
+  temporaryInput: { persist: 'memory' },
   sensitiveDraft: { persist: 'remoteOnly' }
 }
 ```
@@ -232,7 +231,7 @@ For shared/public devices:
 
 - Prefer `session` or `memory` persistence over `local`
 - Use short `ttlMs` values for persisted fields
-- Mark sensitive fields as `never` or `remoteOnly`
+- Mark sensitive fields as `memory` or `remoteOnly`
 - Offer a visible “Start again” action that calls `startAgain()`
 - Offer a visible “Clear saved progress” action that calls `clearSavedProgress()`
 
@@ -240,7 +239,7 @@ For shared/public devices:
 
 - Do not store secrets in funnel values.
 - Treat local/session storage as user-accessible and non-secret storage.
-- Persist only what is required; default sensitive fields to `never` or `remoteOnly`.
+- Persist only what is required; default sensitive fields to `memory` or `remoteOnly`.
 - Redact or minimize telemetry in lifecycle callbacks unless required.
 - Validate and sanitize values server-side before trusting updates/submissions.
 
