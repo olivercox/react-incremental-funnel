@@ -78,6 +78,9 @@ describe('useIncrementalFunnel', () => {
     expect(snapshot?.isDirty).toBe(false);
     expect(snapshot?.isSubmitted).toBe(false);
     expect(snapshot?.hasSavedProgress).toBe(false);
+    expect(snapshot?.savedProgressExists).toBe(false);
+    expect(snapshot?.savedProgressIsStale).toBe(false);
+    expect(snapshot?.savedProgressMetadata).toBeNull();
     expect(snapshot?.sessionMetadata).toBeNull();
     expect(snapshot?.sessionCreationStatus).toBe('idle');
     expect(snapshot?.sessionCreationError).toBeNull();
@@ -150,6 +153,79 @@ describe('useIncrementalFunnel', () => {
     expect(snapshot?.values).toEqual({ email: 'hello@example.com' });
     expect(snapshot?.isDirty).toBe(false);
     expect(snapshot?.isSubmitted).toBe(false);
+  });
+
+  it('supports saved-progress helper actions including startAgain', () => {
+    type FunnelValues = {
+      email: string;
+      firstName?: string;
+    };
+    const createSession = vi.fn(async () => ({ id: 'session-2' }));
+    const localStorageAdapter = {
+      getItem: vi.fn(() => null),
+      setItem: vi.fn(),
+      removeItem: vi.fn()
+    };
+    const sessionStorageAdapter = {
+      getItem: vi.fn(() => null),
+      setItem: vi.fn(),
+      removeItem: vi.fn()
+    };
+    const memoryStorageAdapter = {
+      getItem: vi.fn(() => null),
+      setItem: vi.fn(),
+      removeItem: vi.fn()
+    };
+    let snapshot:
+      | ReturnType<
+          typeof useIncrementalFunnel<FunnelValues, 'welcome' | 'details'>
+        >
+      | undefined;
+
+    function Example(): null {
+      const stepRef = useRef(0);
+      const funnel = useIncrementalFunnel<FunnelValues, 'welcome' | 'details'>({
+        storageKey: 'customer-funnel',
+        initialValues: { email: 'hello@example.com' },
+        steps: ['welcome', 'details'] as const,
+        persistStepState: true,
+        createSession,
+        storageAdapters: {
+          local: localStorageAdapter,
+          session: sessionStorageAdapter,
+          memory: memoryStorageAdapter
+        }
+      });
+
+      if (stepRef.current === 0) {
+        stepRef.current = 1;
+        funnel.updateValues({ firstName: 'Ada' });
+        funnel.goToStep('details');
+        funnel.markStepComplete('welcome');
+        funnel.markSubmitted();
+      } else if (stepRef.current === 1) {
+        stepRef.current = 2;
+        funnel.continueSavedProgress();
+        funnel.startAgain();
+      }
+
+      snapshot = funnel;
+      return null;
+    }
+
+    renderToString(createElement(Example));
+
+    expect(snapshot?.values).toEqual({ email: 'hello@example.com' });
+    expect(snapshot?.currentStepId).toBe('welcome');
+    expect(snapshot?.completedStepIds).toEqual([]);
+    expect(snapshot?.isSubmitted).toBe(false);
+    expect(snapshot?.savedProgressExists).toBe(false);
+    expect(snapshot?.savedProgressIsStale).toBe(false);
+    expect(snapshot?.savedProgressMetadata).toBeNull();
+    expect(createSession).toHaveBeenCalledTimes(1);
+    expect(localStorageAdapter.removeItem).toHaveBeenCalledWith('customer-funnel');
+    expect(sessionStorageAdapter.removeItem).toHaveBeenCalledWith('customer-funnel');
+    expect(memoryStorageAdapter.removeItem).toHaveBeenCalledWith('customer-funnel');
   });
 
   it('is safe for server rendering when storage key is set', () => {

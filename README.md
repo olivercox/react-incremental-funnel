@@ -66,6 +66,17 @@ funnel.nextStep();
 funnel.markStepComplete('welcome');
 funnel.markSubmitted();
 funnel.clearValues();
+
+if (funnel.savedProgressExists) {
+  if (funnel.savedProgressIsStale) {
+    funnel.startAgain();
+  } else {
+    funnel.continueSavedProgress();
+  }
+}
+
+// clears persisted progress only
+funnel.clearSavedProgress();
 ```
 
 ## Development

@@ -115,6 +115,9 @@ export interface UseIncrementalFunnelResult<
   isDirty: boolean;
   isSubmitted: boolean;
   hasSavedProgress: boolean;
+  savedProgressExists: boolean;
+  savedProgressIsStale: boolean;
+  savedProgressMetadata: SavedProgressMetadata<TStepId> | null;
   remoteSyncStatus: RemoteSyncStatus;
   lastSuccessfulRemoteSyncAt: number | null;
   sessionMetadata: unknown;
@@ -126,6 +129,9 @@ export interface UseIncrementalFunnelResult<
   canGoBack: boolean;
   updateValues: (nextValues: Partial<TValues>) => void;
   clearValues: () => void;
+  continueSavedProgress: () => void;
+  clearSavedProgress: () => void;
+  startAgain: () => void;
   markSubmitted: () => void;
   goToStep: (stepId: TStepId) => void;
   nextStep: () => void;
@@ -134,6 +140,16 @@ export interface UseIncrementalFunnelResult<
   markStepIncomplete: (stepId: TStepId) => void;
   flushRemoteUpdates: () => Promise<void>;
   retryRemoteUpdates: () => Promise<void>;
+}
+
+export interface SavedProgressMetadata<
+  TStepId extends FunnelStepId = FunnelStepId
+> {
+  lastUpdatedAt: number | null;
+  currentStepId: TStepId | null;
+  completedStepIds: readonly TStepId[];
+  sources: readonly ('local' | 'session' | 'memory')[];
+  staleEntriesPruned: number;
 }
 
 export interface IncrementalFunnelRemoteUpdate<
@@ -155,12 +171,22 @@ interface PersistedStepState<TStepId extends FunnelStepId = FunnelStepId> {
 interface PersistedLocalEnvelope<TStepId extends FunnelStepId = FunnelStepId> {
   fieldState?: Record<string, unknown>;
   stepState?: PersistedStepState<TStepId>;
+  metadata?: PersistedSavedProgressMetadata<TStepId>;
   values?: Record<string, unknown>;
 }
 
 interface PersistedSessionEnvelope {
   fieldState?: Record<string, unknown>;
+  metadata?: PersistedSavedProgressMetadata;
   values?: Record<string, unknown>;
+}
+
+interface PersistedSavedProgressMetadata<
+  TStepId extends FunnelStepId = FunnelStepId
+> {
+  lastUpdatedAt?: number;
+  currentStepId?: TStepId | null;
+  completedStepIds?: readonly TStepId[];
 }
 
 const defaultLocalStorageAdapter = createLocalStorageAdapter();
@@ -255,6 +281,9 @@ export function useIncrementalFunnel<
   );
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [hasSavedProgress, setHasSavedProgress] = useState(false);
+  const [savedProgressIsStale, setSavedProgressIsStale] = useState(false);
+  const [savedProgressMetadata, setSavedProgressMetadata] =
+    useState<SavedProgressMetadata<TStepId> | null>(null);
   const [remoteSyncStatus, setRemoteSyncStatus] =
     useState<RemoteSyncStatus>('idle');
   const [lastSuccessfulRemoteSyncAt, setLastSuccessfulRemoteSyncAt] =
@@ -264,6 +293,7 @@ export function useIncrementalFunnel<
     useState<SessionCreationStatus>('idle');
   const [sessionCreationError, setSessionCreationError] = useState<unknown>(null);
   const didStartSessionCreationRef = useRef(false);
+  const sessionCreationRequestIdRef = useRef(0);
   const pendingRemoteValuesRef = useRef<Partial<TValues>>({});
   const pendingRemoteStepStateRef = useRef<PersistedStepState<TStepId> | null>(
     null
@@ -273,6 +303,34 @@ export function useIncrementalFunnel<
   const currentStepIdRef = useRef<TStepId | null>(initialCurrentStepId);
   const completedStepIdsRef = useRef<TStepId[]>([]);
   const resolvedRemoteUpdate = updateRemote ?? remoteUpdate;
+
+  const requestSessionCreation = useCallback(() => {
+    if (!createSession) {
+      return;
+    }
+
+    sessionCreationRequestIdRef.current += 1;
+    const requestId = sessionCreationRequestIdRef.current;
+    setSessionMetadata(null);
+    setSessionCreationStatus('creating');
+    setSessionCreationError(null);
+
+    void createSession()
+      .then(metadata => {
+        if (requestId !== sessionCreationRequestIdRef.current) {
+          return;
+        }
+        setSessionMetadata(metadata);
+        setSessionCreationStatus('created');
+      })
+      .catch(error => {
+        if (requestId !== sessionCreationRequestIdRef.current) {
+          return;
+        }
+        setSessionCreationError(error);
+        setSessionCreationStatus('failed');
+      });
+  }, [createSession]);
 
   useEffect(() => {
     setValues(resolvedInitialValues);
@@ -292,30 +350,8 @@ export function useIncrementalFunnel<
     }
 
     didStartSessionCreationRef.current = true;
-    let isCancelled = false;
-    setSessionCreationStatus('creating');
-    setSessionCreationError(null);
-
-    void createSession()
-      .then(metadata => {
-        if (isCancelled) {
-          return;
-        }
-        setSessionMetadata(metadata);
-        setSessionCreationStatus('created');
-      })
-      .catch(error => {
-        if (isCancelled) {
-          return;
-        }
-        setSessionCreationError(error);
-        setSessionCreationStatus('failed');
-      });
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [createSession]);
+    requestSessionCreation();
+  }, [createSession, requestSessionCreation]);
 
   useEffect(() => {
     if (
@@ -335,6 +371,10 @@ export function useIncrementalFunnel<
       let nextValues = { ...resolvedInitialValues } as Record<string, unknown>;
       let didPruneLocal = false;
       let didPruneSession = false;
+      let staleEntriesPruned = 0;
+      const restoredSources = new Set<'local' | 'session' | 'memory'>();
+      let restoredLastUpdatedAt: number | null = null;
+      let restoredStepState: PersistedStepState<TStepId> | null = null;
 
       const localEnvelope: PersistedLocalEnvelope<TStepId> = {};
       const storedRaw = adapters.local.getItem(storageKey);
@@ -365,12 +405,23 @@ export function useIncrementalFunnel<
           nextValues = localApplied.nextValues;
           if (Object.keys(localFieldState).length > 0) {
             didRestoreAnyProgress = true;
+            restoredSources.add('local');
+            if (
+              typeof storedState.metadata?.lastUpdatedAt === 'number' &&
+              Number.isFinite(storedState.metadata.lastUpdatedAt)
+            ) {
+              restoredLastUpdatedAt = Math.max(
+                restoredLastUpdatedAt ?? storedState.metadata.lastUpdatedAt,
+                storedState.metadata.lastUpdatedAt
+              );
+            }
           }
           if (localApplied.expiredPaths.length > 0) {
             for (const path of localApplied.expiredPaths) {
               delete localFieldState[path];
             }
             didPruneLocal = true;
+            staleEntriesPruned += localApplied.expiredPaths.length;
           }
           localEnvelope.fieldState = localFieldState;
 
@@ -394,6 +445,15 @@ export function useIncrementalFunnel<
                 ) as TStepId[]
               );
               didRestoreAnyProgress = true;
+              restoredSources.add('local');
+              restoredStepState = {
+                currentStepId: parsedCurrentStepId as TStepId | null,
+                completedStepIds: parsedCompletedStepIds.filter(
+                  stepId =>
+                    typeof stepId === 'string' &&
+                    stepIds.has(stepId as TStepId)
+                ) as TStepId[]
+              };
             }
           }
         }
@@ -421,12 +481,23 @@ export function useIncrementalFunnel<
           nextValues = sessionApplied.nextValues;
           if (Object.keys(sessionFieldState).length > 0) {
             didRestoreAnyProgress = true;
+            restoredSources.add('session');
+            if (
+              typeof sessionEnvelope.metadata?.lastUpdatedAt === 'number' &&
+              Number.isFinite(sessionEnvelope.metadata.lastUpdatedAt)
+            ) {
+              restoredLastUpdatedAt = Math.max(
+                restoredLastUpdatedAt ?? sessionEnvelope.metadata.lastUpdatedAt,
+                sessionEnvelope.metadata.lastUpdatedAt
+              );
+            }
           }
           if (sessionApplied.expiredPaths.length > 0) {
             for (const path of sessionApplied.expiredPaths) {
               delete sessionFieldState[path];
             }
             didPruneSession = true;
+            staleEntriesPruned += sessionApplied.expiredPaths.length;
           }
 
           if (didPruneSession) {
@@ -434,7 +505,16 @@ export function useIncrementalFunnel<
               adapters.session.setItem(
                 storageKey,
                 JSON.stringify({
-                  fieldState: sessionFieldState
+                  fieldState: sessionFieldState,
+                  metadata: {
+                    lastUpdatedAt:
+                      restoredLastUpdatedAt ??
+                      (typeof sessionEnvelope.metadata?.lastUpdatedAt === 'number'
+                        ? sessionEnvelope.metadata.lastUpdatedAt
+                        : now),
+                    currentStepId: restoredStepState?.currentStepId ?? null,
+                    completedStepIds: restoredStepState?.completedStepIds ?? []
+                  }
                 })
               );
             } else {
@@ -458,11 +538,13 @@ export function useIncrementalFunnel<
         nextValues = memoryApplied.nextValues;
         if (Object.keys(parsedMemoryFieldState).length > 0) {
           didRestoreAnyProgress = true;
+          restoredSources.add('memory');
         }
         if (memoryApplied.expiredPaths.length > 0) {
           for (const path of memoryApplied.expiredPaths) {
             delete parsedMemoryFieldState[path];
           }
+          staleEntriesPruned += memoryApplied.expiredPaths.length;
           if (Object.keys(parsedMemoryFieldState).length > 0) {
             adapters.memory.setItem(storageKey, JSON.stringify(parsedMemoryFieldState));
           } else {
@@ -488,15 +570,38 @@ export function useIncrementalFunnel<
               ...(Object.keys(localEnvelope.fieldState ?? {}).length > 0
                 ? { fieldState: localEnvelope.fieldState }
                 : {}),
-              ...(hasStepState ? { stepState: localEnvelope.stepState } : {})
+              ...(hasStepState ? { stepState: localEnvelope.stepState } : {}),
+              metadata: {
+                lastUpdatedAt: restoredLastUpdatedAt ?? now,
+                currentStepId: restoredStepState?.currentStepId ?? null,
+                completedStepIds: restoredStepState?.completedStepIds ?? []
+              }
             })
           );
         }
       }
 
       setValues(nextValues as Partial<TValues>);
+      setSavedProgressIsStale(staleEntriesPruned > 0);
       if (didRestoreAnyProgress) {
         setHasSavedProgress(true);
+        setSavedProgressMetadata({
+          lastUpdatedAt: restoredLastUpdatedAt,
+          currentStepId: restoredStepState?.currentStepId ?? null,
+          completedStepIds: restoredStepState?.completedStepIds ?? [],
+          sources: [...restoredSources],
+          staleEntriesPruned
+        });
+      } else if (staleEntriesPruned > 0) {
+        setSavedProgressMetadata({
+          lastUpdatedAt: restoredLastUpdatedAt,
+          currentStepId: null,
+          completedStepIds: [],
+          sources: [...restoredSources],
+          staleEntriesPruned
+        });
+      } else {
+        setSavedProgressMetadata(null);
       }
     } catch {
       return;
@@ -547,7 +652,12 @@ export function useIncrementalFunnel<
       const shouldPersistStepState =
         persistStepState &&
         (completedStepIds.length > 0 || !Object.is(currentStepId, initialCurrentStepId));
-      const localPayload = {
+      const persistedMetadata = {
+        lastUpdatedAt: now,
+        currentStepId,
+        completedStepIds
+      };
+      const localPayloadBase = {
         ...(Object.keys(localFieldState).length > 0
           ? { fieldState: localFieldState }
           : {}),
@@ -560,6 +670,13 @@ export function useIncrementalFunnel<
             }
           : {})
       };
+      const localPayload =
+        Object.keys(localPayloadBase).length > 0
+          ? {
+              ...localPayloadBase,
+              metadata: persistedMetadata
+            }
+          : localPayloadBase;
 
       if (Object.keys(localPayload).length === 0) {
         adapters.local.removeItem(storageKey);
@@ -573,16 +690,39 @@ export function useIncrementalFunnel<
         adapters.session.setItem(
           storageKey,
           JSON.stringify({
-            fieldState: sessionFieldState
+            fieldState: sessionFieldState,
+            metadata: persistedMetadata
           })
         );
       }
 
-      setHasSavedProgress(
+      const savedProgressExists =
         Object.keys(localPayload).length > 0 ||
-          Object.keys(sessionFieldState).length > 0 ||
-          Object.keys(memoryFieldState).length > 0
+        Object.keys(sessionFieldState).length > 0 ||
+        Object.keys(memoryFieldState).length > 0;
+      setHasSavedProgress(savedProgressExists);
+      setSavedProgressMetadata(
+        savedProgressExists
+          ? {
+              lastUpdatedAt: now,
+              currentStepId,
+              completedStepIds,
+              sources: [
+                ...(Object.keys(localPayload).length > 0 ? (['local'] as const) : []),
+                ...(Object.keys(sessionFieldState).length > 0
+                  ? (['session'] as const)
+                  : []),
+                ...(Object.keys(memoryFieldState).length > 0
+                  ? (['memory'] as const)
+                  : [])
+              ],
+              staleEntriesPruned: 0
+            }
+          : null
       );
+      if (savedProgressExists) {
+        setSavedProgressIsStale(false);
+      }
     } catch {
       return;
     }
@@ -779,6 +919,49 @@ export function useIncrementalFunnel<
     });
   }, [queueRemoteUpdate, resolvedInitialValues]);
 
+  const clearSavedProgress = useCallback(() => {
+    if (storageKey) {
+      adapters.local.removeItem(storageKey);
+      adapters.session.removeItem(storageKey);
+      adapters.memory.removeItem(storageKey);
+    }
+    setHasSavedProgress(false);
+    setSavedProgressIsStale(false);
+    setSavedProgressMetadata(null);
+  }, [adapters, storageKey]);
+
+  const continueSavedProgress = useCallback(() => {
+    setSavedProgressIsStale(false);
+  }, []);
+
+  const startAgain = useCallback(() => {
+    clearSavedProgress();
+    setValues(resolvedInitialValues);
+    setCurrentStepId(initialCurrentStepId);
+    setCompletedStepIds([]);
+    setIsSubmitted(false);
+    setRemoteSyncStatus('idle');
+    pendingRemoteValuesRef.current = {} as Partial<TValues>;
+    pendingRemoteStepStateRef.current = null;
+    if (remoteSyncTimerRef.current) {
+      clearTimeout(remoteSyncTimerRef.current);
+      remoteSyncTimerRef.current = null;
+    }
+    if (createSession) {
+      requestSessionCreation();
+    } else {
+      setSessionMetadata(null);
+      setSessionCreationStatus('idle');
+      setSessionCreationError(null);
+    }
+  }, [
+    clearSavedProgress,
+    createSession,
+    initialCurrentStepId,
+    requestSessionCreation,
+    resolvedInitialValues
+  ]);
+
   const markSubmitted = useCallback(() => {
     setIsSubmitted(true);
   }, []);
@@ -896,6 +1079,9 @@ export function useIncrementalFunnel<
     isDirty,
     isSubmitted,
     hasSavedProgress,
+    savedProgressExists: hasSavedProgress,
+    savedProgressIsStale,
+    savedProgressMetadata,
     remoteSyncStatus,
     lastSuccessfulRemoteSyncAt,
     sessionMetadata,
@@ -907,6 +1093,9 @@ export function useIncrementalFunnel<
     canGoBack,
     updateValues,
     clearValues,
+    continueSavedProgress,
+    clearSavedProgress,
+    startAgain,
     markSubmitted,
     goToStep,
     nextStep,
