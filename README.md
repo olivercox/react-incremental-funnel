@@ -128,4 +128,5 @@ npm run build
 - `advanceFunnel`
 - `useIncrementalFunnel`
 - `createLocalStorageAdapter`, `createSessionStorageAdapter`, `createMemoryStorageAdapter`
+- `pickPersistableValues`, `removeBlockedFields`, `redactValues`
 - `FunnelStep`, `FunnelState`, `UseIncrementalFunnelOptions`, `UseIncrementalFunnelResult`, `FunnelStepId`
