@@ -92,6 +92,7 @@ export interface UseIncrementalFunnelOptions<
   storageAdapters?: Partial<Record<'local' | 'session' | 'memory', StorageAdapter>>;
   createSession?: () => Promise<unknown>;
   updateRemote?: (values: Partial<TValues>) => void | Promise<void>;
+  submitRemote?: (values: Partial<TValues>) => void | Promise<void>;
   remoteUpdate?: (
     update: IncrementalFunnelRemoteUpdate<TValues, TStepId>
   ) => void | Promise<void>;
@@ -105,6 +106,7 @@ export type RemoteSyncStatus =
   | 'failed';
 
 export type SessionCreationStatus = 'idle' | 'creating' | 'created' | 'failed';
+export type SubmitStatus = 'idle' | 'submitting' | 'submitted' | 'failed';
 
 export interface UseIncrementalFunnelResult<
   TValues extends Record<string, unknown>,
@@ -123,6 +125,8 @@ export interface UseIncrementalFunnelResult<
   sessionMetadata: unknown;
   sessionCreationStatus: SessionCreationStatus;
   sessionCreationError: unknown;
+  submitStatus: SubmitStatus;
+  submitError: unknown;
   currentStepId: TStepId | null;
   completedStepIds: readonly TStepId[];
   canGoNext: boolean;
@@ -138,6 +142,7 @@ export interface UseIncrementalFunnelResult<
   previousStep: () => void;
   markStepComplete: (stepId: TStepId) => void;
   markStepIncomplete: (stepId: TStepId) => void;
+  submit: () => Promise<void>;
   flushRemoteUpdates: () => Promise<void>;
   retryRemoteUpdates: () => Promise<void>;
 }
@@ -235,6 +240,7 @@ export function useIncrementalFunnel<
     storageAdapters,
     createSession,
     updateRemote,
+    submitRemote,
     remoteUpdate
   } = options;
   const steps = useMemo(() => [...(configuredSteps ?? [])], [configuredSteps]);
@@ -292,6 +298,8 @@ export function useIncrementalFunnel<
   const [sessionCreationStatus, setSessionCreationStatus] =
     useState<SessionCreationStatus>('idle');
   const [sessionCreationError, setSessionCreationError] = useState<unknown>(null);
+  const [submitStatus, setSubmitStatus] = useState<SubmitStatus>('idle');
+  const [submitError, setSubmitError] = useState<unknown>(null);
   const didStartSessionCreationRef = useRef(false);
   const sessionCreationRequestIdRef = useRef(0);
   const pendingRemoteValuesRef = useRef<Partial<TValues>>({});
@@ -302,6 +310,7 @@ export function useIncrementalFunnel<
   const remoteSyncInFlightRef = useRef<Promise<void> | null>(null);
   const currentStepIdRef = useRef<TStepId | null>(initialCurrentStepId);
   const completedStepIdsRef = useRef<TStepId[]>([]);
+  const isSubmittedRef = useRef(false);
   const resolvedRemoteUpdate = updateRemote ?? remoteUpdate;
 
   const requestSessionCreation = useCallback(() => {
@@ -335,6 +344,8 @@ export function useIncrementalFunnel<
   useEffect(() => {
     setValues(resolvedInitialValues);
     setIsSubmitted(false);
+    setSubmitStatus('idle');
+    setSubmitError(null);
   }, [resolvedInitialValues]);
 
   useEffect(() => {
@@ -746,6 +757,10 @@ export function useIncrementalFunnel<
     completedStepIdsRef.current = [...completedStepIds];
   }, [completedStepIds]);
 
+  useEffect(() => {
+    isSubmittedRef.current = isSubmitted;
+  }, [isSubmitted]);
+
   const hasPendingRemoteSync = useCallback(() => {
     return (
       Object.keys(pendingRemoteValuesRef.current as Record<string, unknown>).length > 0 ||
@@ -834,7 +849,7 @@ export function useIncrementalFunnel<
 
   const queueRemoteUpdate = useCallback(
     (partialValues: Partial<TValues>, nextStepState?: PersistedStepState<TStepId>) => {
-      if (!resolvedRemoteUpdate) {
+      if (!resolvedRemoteUpdate || isSubmittedRef.current) {
         return;
       }
 
@@ -901,7 +916,6 @@ export function useIncrementalFunnel<
       setValues(
         previousValues => ({ ...previousValues, ...nextValues }) as Partial<TValues>
       );
-      setIsSubmitted(false);
       queueRemoteUpdate(nextValues, {
         currentStepId: currentStepIdRef.current,
         completedStepIds: completedStepIdsRef.current
@@ -913,6 +927,9 @@ export function useIncrementalFunnel<
   const clearValues = useCallback(() => {
     setValues(resolvedInitialValues);
     setIsSubmitted(false);
+    isSubmittedRef.current = false;
+    setSubmitStatus('idle');
+    setSubmitError(null);
     queueRemoteUpdate(resolvedInitialValues, {
       currentStepId: currentStepIdRef.current,
       completedStepIds: completedStepIdsRef.current
@@ -940,6 +957,9 @@ export function useIncrementalFunnel<
     setCurrentStepId(initialCurrentStepId);
     setCompletedStepIds([]);
     setIsSubmitted(false);
+    isSubmittedRef.current = false;
+    setSubmitStatus('idle');
+    setSubmitError(null);
     setRemoteSyncStatus('idle');
     pendingRemoteValuesRef.current = {} as Partial<TValues>;
     pendingRemoteStepStateRef.current = null;
@@ -964,7 +984,43 @@ export function useIncrementalFunnel<
 
   const markSubmitted = useCallback(() => {
     setIsSubmitted(true);
+    isSubmittedRef.current = true;
+    setSubmitStatus('submitted');
+    setSubmitError(null);
   }, []);
+
+  const submit = useCallback(async () => {
+    if (submitStatus === 'submitting') {
+      return;
+    }
+
+    setSubmitStatus('submitting');
+    setSubmitError(null);
+
+    await flushRemoteUpdates();
+
+    try {
+      if (submitRemote) {
+        await submitRemote(values);
+      }
+      if (remoteSyncTimerRef.current) {
+        clearTimeout(remoteSyncTimerRef.current);
+        remoteSyncTimerRef.current = null;
+      }
+      pendingRemoteValuesRef.current = {} as Partial<TValues>;
+      pendingRemoteStepStateRef.current = null;
+      setRemoteSyncStatus('idle');
+      setIsSubmitted(true);
+      isSubmittedRef.current = true;
+      setSubmitStatus('submitted');
+      setSubmitError(null);
+      clearSavedProgress();
+    } catch (error) {
+      setSubmitStatus('failed');
+      setSubmitError(error);
+      throw error;
+    }
+  }, [clearSavedProgress, flushRemoteUpdates, submitRemote, submitStatus, values]);
 
   const goToStep = useCallback(
     (stepId: TStepId) => {
@@ -1087,6 +1143,8 @@ export function useIncrementalFunnel<
     sessionMetadata,
     sessionCreationStatus,
     sessionCreationError,
+    submitStatus,
+    submitError,
     currentStepId,
     completedStepIds,
     canGoNext,
@@ -1102,6 +1160,7 @@ export function useIncrementalFunnel<
     previousStep,
     markStepComplete,
     markStepIncomplete,
+    submit,
     flushRemoteUpdates,
     retryRemoteUpdates
   };
