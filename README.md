@@ -14,7 +14,6 @@ npm install react-incremental-funnel
 import {
   createFunnel,
   advanceFunnel,
-  useIncrementalFunnel,
   type FunnelStep
 } from 'react-incremental-funnel';
 
@@ -28,7 +27,20 @@ const initial = createFunnel(steps);
 const next = advanceFunnel(initial, 'details');
 
 // in React components
-const funnel = useIncrementalFunnel(steps);
+import { useIncrementalFunnel } from 'react-incremental-funnel';
+
+type CustomerFunnelValues = {
+  email?: string;
+  firstName?: string;
+};
+
+const funnel = useIncrementalFunnel<CustomerFunnelValues>({
+  storageKey: 'customer-funnel'
+});
+
+funnel.updateValues({ email: 'hello@example.com' });
+funnel.markSubmitted();
+funnel.clearValues();
 ```
 
 ## Development
@@ -45,4 +57,4 @@ npm run build
 - `createFunnel`
 - `advanceFunnel`
 - `useIncrementalFunnel`
-- `FunnelStep`, `FunnelState`, `UseIncrementalFunnelResult`, `FunnelStepId`
+- `FunnelStep`, `FunnelState`, `UseIncrementalFunnelOptions`, `UseIncrementalFunnelResult`, `FunnelStepId`
