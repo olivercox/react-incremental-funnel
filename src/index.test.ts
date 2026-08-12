@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
+import { createElement, useRef } from 'react';
+// @ts-expect-error repository does not currently include @types/react-dom
+import { renderToString } from 'react-dom/server';
 
-import { advanceFunnel, createFunnel, type FunnelStep } from './index';
+import {
+  advanceFunnel,
+  createFunnel,
+  type FunnelStep,
+  useIncrementalFunnel
+} from './index';
 
 describe('createFunnel', () => {
   const steps: FunnelStep<'welcome' | 'details' | 'confirm'>[] = [
@@ -43,5 +51,125 @@ describe('advanceFunnel', () => {
     const advanced = advanceFunnel(initial, 'details');
 
     expect(advanced.currentStepId).toBe('details');
+  });
+});
+
+describe('useIncrementalFunnel', () => {
+  it('exposes initial values and lifecycle state', () => {
+    type FunnelValues = {
+      email: string;
+    };
+    let snapshot:
+      | ReturnType<typeof useIncrementalFunnel<FunnelValues>>
+      | undefined;
+
+    function Example(): null {
+      snapshot = useIncrementalFunnel<FunnelValues>({
+        initialValues: { email: 'hello@example.com' }
+      });
+      return null;
+    }
+
+    renderToString(createElement(Example));
+
+    expect(snapshot).toBeDefined();
+    expect(snapshot?.values).toEqual({ email: 'hello@example.com' });
+    expect(snapshot?.isReady).toBe(true);
+    expect(snapshot?.isDirty).toBe(false);
+    expect(snapshot?.isSubmitted).toBe(false);
+    expect(snapshot?.hasSavedProgress).toBe(false);
+  });
+
+  it('updates partial values', () => {
+    type FunnelValues = {
+      email: string;
+      firstName: string;
+    };
+    let snapshot:
+      | ReturnType<typeof useIncrementalFunnel<FunnelValues>>
+      | undefined;
+
+    function Example(): null {
+      const didUpdateRef = useRef(false);
+      const funnel = useIncrementalFunnel<FunnelValues>({
+        initialValues: { email: 'hello@example.com' }
+      });
+
+      if (!didUpdateRef.current) {
+        didUpdateRef.current = true;
+        funnel.updateValues({ firstName: 'Ada' });
+      }
+
+      snapshot = funnel;
+      return null;
+    }
+
+    renderToString(createElement(Example));
+
+    expect(snapshot?.values).toEqual({
+      email: 'hello@example.com',
+      firstName: 'Ada'
+    });
+    expect(snapshot?.isDirty).toBe(true);
+    expect(snapshot?.isSubmitted).toBe(false);
+  });
+
+  it('clears values and resets dirty/submitted state', () => {
+    type FunnelValues = {
+      email: string;
+      firstName: string;
+    };
+    let snapshot:
+      | ReturnType<typeof useIncrementalFunnel<FunnelValues>>
+      | undefined;
+
+    function Example(): null {
+      const stepRef = useRef(0);
+      const funnel = useIncrementalFunnel<FunnelValues>({
+        initialValues: { email: 'hello@example.com' }
+      });
+
+      if (stepRef.current === 0) {
+        stepRef.current = 1;
+        funnel.updateValues({ firstName: 'Ada' });
+        funnel.markSubmitted();
+      } else if (stepRef.current === 1) {
+        stepRef.current = 2;
+        funnel.clearValues();
+      }
+
+      snapshot = funnel;
+      return null;
+    }
+
+    renderToString(createElement(Example));
+
+    expect(snapshot?.values).toEqual({ email: 'hello@example.com' });
+    expect(snapshot?.isDirty).toBe(false);
+    expect(snapshot?.isSubmitted).toBe(false);
+  });
+
+  it('is safe for server rendering when storage key is set', () => {
+    type FunnelValues = {
+      email: string;
+    };
+
+    function Example(): null {
+      useIncrementalFunnel<FunnelValues>({
+        storageKey: 'customer-funnel',
+        initialValues: { email: 'hello@example.com' }
+      });
+      return null;
+    }
+
+    const previousWindow = globalThis.window;
+    // @ts-expect-error deleting test-only global
+    delete globalThis.window;
+
+    expect(() => renderToString(createElement(Example))).not.toThrow();
+
+    if (typeof previousWindow !== 'undefined') {
+      globalThis.window = previousWindow;
+    }
   });
 });
