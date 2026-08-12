@@ -172,4 +172,116 @@ describe('useIncrementalFunnel', () => {
       globalThis.window = previousWindow;
     }
   });
+
+  it('supports configured step navigation and completion state', () => {
+    let snapshot:
+      | ReturnType<
+          typeof useIncrementalFunnel<
+            Record<string, unknown>,
+            'services' | 'availability' | 'contact' | 'submit'
+          >
+        >
+      | undefined;
+
+    function Example(): null {
+      const didUpdateRef = useRef(false);
+      const funnel = useIncrementalFunnel({
+        steps: ['services', 'availability', 'contact', 'submit'] as const
+      });
+
+      if (!didUpdateRef.current) {
+        didUpdateRef.current = true;
+        funnel.nextStep();
+        funnel.markStepComplete('services');
+      }
+
+      snapshot = funnel;
+      return null;
+    }
+
+    renderToString(createElement(Example));
+
+    expect(snapshot?.currentStepId).toBe('availability');
+    expect(snapshot?.completedStepIds).toEqual(['services']);
+    expect(snapshot?.canGoBack).toBe(true);
+    expect(snapshot?.canGoNext).toBe(true);
+  });
+
+  it('can move to previous and specific steps', () => {
+    let snapshot:
+      | ReturnType<
+          typeof useIncrementalFunnel<
+            Record<string, unknown>,
+            'services' | 'availability' | 'contact'
+          >
+        >
+      | undefined;
+
+    function Example(): null {
+      const didUpdateRef = useRef(false);
+      const funnel = useIncrementalFunnel({
+        steps: ['services', 'availability', 'contact'] as const
+      });
+
+      if (!didUpdateRef.current) {
+        didUpdateRef.current = true;
+        funnel.goToStep('contact');
+        funnel.previousStep();
+      }
+
+      snapshot = funnel;
+      return null;
+    }
+
+    renderToString(createElement(Example));
+
+    expect(snapshot?.currentStepId).toBe('availability');
+    expect(snapshot?.canGoBack).toBe(true);
+    expect(snapshot?.canGoNext).toBe(true);
+  });
+
+  it('marks steps incomplete', () => {
+    let snapshot:
+      | ReturnType<
+          typeof useIncrementalFunnel<
+            Record<string, unknown>,
+            'services' | 'availability'
+          >
+        >
+      | undefined;
+
+    function Example(): null {
+      const didUpdateRef = useRef(false);
+      const funnel = useIncrementalFunnel({
+        steps: ['services', 'availability'] as const
+      });
+
+      if (!didUpdateRef.current) {
+        didUpdateRef.current = true;
+        funnel.markStepComplete('services');
+        funnel.markStepIncomplete('services');
+      }
+
+      snapshot = funnel;
+      return null;
+    }
+
+    renderToString(createElement(Example));
+
+    expect(snapshot?.completedStepIds).toEqual([]);
+  });
+
+  it('throws when navigating to an unknown step', () => {
+    function Example(): null {
+      const funnel = useIncrementalFunnel({
+        steps: ['services', 'availability'] as const
+      });
+      funnel.goToStep('missing' as never);
+      return null;
+    }
+
+    expect(() => renderToString(createElement(Example))).toThrowError(
+      'Step id must exist in steps.'
+    );
+  });
 });

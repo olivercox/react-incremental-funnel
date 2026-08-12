@@ -35,10 +35,15 @@ type CustomerFunnelValues = {
 };
 
 const funnel = useIncrementalFunnel<CustomerFunnelValues>({
-  storageKey: 'customer-funnel'
+  storageKey: 'customer-funnel',
+  steps: ['welcome', 'details', 'confirm'],
+  persistStepState: true,
+  includeStepStateInRemoteUpdate: true
 });
 
 funnel.updateValues({ email: 'hello@example.com' });
+funnel.nextStep();
+funnel.markStepComplete('welcome');
 funnel.markSubmitted();
 funnel.clearValues();
 ```
