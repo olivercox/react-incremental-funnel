@@ -77,6 +77,20 @@ export function advanceFunnel<TStepId extends FunnelStepId>(
   };
 }
 
+export interface IncrementalFunnelLifecycleMetadata<
+  TStepId extends FunnelStepId = FunnelStepId
+> {
+  stepId: TStepId | null;
+  completedStepIds: readonly TStepId[];
+  timestamp: number;
+}
+
+export type IncrementalFunnelLifecycleValues<
+  TValues extends Record<string, unknown>
+> = {
+  values?: Partial<TValues>;
+};
+
 export interface UseIncrementalFunnelOptions<
   TValues extends Record<string, unknown>,
   TStepId extends FunnelStepId = FunnelStepId
@@ -109,6 +123,59 @@ export interface UseIncrementalFunnelOptions<
   remoteUpdate?: (
     update: IncrementalFunnelRemoteUpdate<TValues, TStepId>
   ) => void | Promise<void>;
+  includeValuesInLifecycleCallbacks?: boolean;
+  onFunnelStarted?: (
+    metadata: IncrementalFunnelLifecycleMetadata<TStepId> &
+      IncrementalFunnelLifecycleValues<TValues>
+  ) => void;
+  onStepStarted?: (
+    metadata: IncrementalFunnelLifecycleMetadata<TStepId> &
+      IncrementalFunnelLifecycleValues<TValues> & {
+        step: TStepId;
+        previousStep: TStepId | null;
+      }
+  ) => void;
+  onStepCompleted?: (
+    metadata: IncrementalFunnelLifecycleMetadata<TStepId> &
+      IncrementalFunnelLifecycleValues<TValues> & {
+        step: TStepId;
+      }
+  ) => void;
+  onValuesChanged?: (
+    metadata: IncrementalFunnelLifecycleMetadata<TStepId> &
+      IncrementalFunnelLifecycleValues<TValues> & {
+        changedValues: Partial<TValues>;
+      }
+  ) => void;
+  onRemoteUpdateSucceeded?: (
+    metadata: IncrementalFunnelLifecycleMetadata<TStepId> &
+      IncrementalFunnelLifecycleValues<TValues> & {
+        syncedValues: Partial<TValues>;
+      }
+  ) => void;
+  onRemoteUpdateFailed?: (
+    metadata: IncrementalFunnelLifecycleMetadata<TStepId> &
+      IncrementalFunnelLifecycleValues<TValues> & {
+        failedValues: Partial<TValues>;
+        error: unknown;
+      }
+  ) => void;
+  onSubmitStarted?: (
+    metadata: IncrementalFunnelLifecycleMetadata<TStepId> &
+      IncrementalFunnelLifecycleValues<TValues>
+  ) => void;
+  onSubmitSucceeded?: (
+    metadata: IncrementalFunnelLifecycleMetadata<TStepId> &
+      IncrementalFunnelLifecycleValues<TValues>
+  ) => void;
+  onSubmitFailed?: (
+    metadata: IncrementalFunnelLifecycleMetadata<TStepId> &
+      IncrementalFunnelLifecycleValues<TValues> & { error: unknown }
+  ) => void;
+  onFunnelReset?: (
+    metadata: IncrementalFunnelLifecycleMetadata<TStepId> &
+      IncrementalFunnelLifecycleValues<TValues>
+  ) => void;
 }
 
 export type RemoteSyncStatus =
@@ -324,7 +391,18 @@ export function useIncrementalFunnel<
     submitRemote,
     validateStep,
     validateAll,
-    remoteUpdate
+    remoteUpdate,
+    includeValuesInLifecycleCallbacks = false,
+    onFunnelStarted,
+    onStepStarted,
+    onStepCompleted,
+    onValuesChanged,
+    onRemoteUpdateSucceeded,
+    onRemoteUpdateFailed,
+    onSubmitStarted,
+    onSubmitSucceeded,
+    onSubmitFailed,
+    onFunnelReset
   } = options;
   const steps = useMemo(() => [...(configuredSteps ?? [])], [configuredSteps]);
   const stepIds = useMemo(() => new Set(steps), [steps]);
@@ -400,8 +478,36 @@ export function useIncrementalFunnel<
   const remoteSyncInFlightRef = useRef<Promise<void> | null>(null);
   const currentStepIdRef = useRef<TStepId | null>(initialCurrentStepId);
   const completedStepIdsRef = useRef<TStepId[]>([]);
+  const valuesRef = useRef<Partial<TValues>>(resolvedInitialValues);
   const isSubmittedRef = useRef(false);
+  const didEmitFunnelStartedRef = useRef(false);
   const resolvedRemoteUpdate = updateRemote ?? remoteUpdate;
+  const withLifecycleValues = useCallback(
+    <TPayload extends Record<string, unknown>>(
+      payload: TPayload,
+      eventValues?: Partial<TValues>
+    ): TPayload & IncrementalFunnelLifecycleValues<TValues> => {
+      if (!includeValuesInLifecycleCallbacks) {
+        return payload as TPayload & IncrementalFunnelLifecycleValues<TValues>;
+      }
+      return {
+        ...payload,
+        values: eventValues ?? valuesRef.current
+      };
+    },
+    [includeValuesInLifecycleCallbacks]
+  );
+  const createLifecycleMetadata = useCallback(
+    (overrides?: {
+      stepId?: TStepId | null;
+      completedStepIds?: readonly TStepId[];
+    }): IncrementalFunnelLifecycleMetadata<TStepId> => ({
+      stepId: overrides?.stepId ?? currentStepIdRef.current,
+      completedStepIds: overrides?.completedStepIds ?? completedStepIdsRef.current,
+      timestamp: Date.now()
+    }),
+    []
+  );
 
   const runStepValidation = useCallback(
     (stepId: TStepId | null, nextValues: Partial<TValues>) => {
@@ -893,8 +999,37 @@ export function useIncrementalFunnel<
   }, [completedStepIds]);
 
   useEffect(() => {
+    valuesRef.current = values;
+  }, [values]);
+
+  useEffect(() => {
     isSubmittedRef.current = isSubmitted;
   }, [isSubmitted]);
+
+  useEffect(() => {
+    if (!isReady || didEmitFunnelStartedRef.current) {
+      return;
+    }
+
+    didEmitFunnelStartedRef.current = true;
+    onFunnelStarted?.(withLifecycleValues(createLifecycleMetadata()));
+    const stepId = currentStepIdRef.current;
+    if (stepId !== null) {
+      onStepStarted?.(
+        withLifecycleValues({
+          ...createLifecycleMetadata({ stepId }),
+          step: stepId,
+          previousStep: null
+        })
+      );
+    }
+  }, [
+    createLifecycleMetadata,
+    isReady,
+    onFunnelStarted,
+    onStepStarted,
+    withLifecycleValues
+  ]);
 
   const hasPendingRemoteSync = useCallback(() => {
     return (
@@ -942,6 +1077,15 @@ export function useIncrementalFunnel<
 
         setLastSuccessfulRemoteSyncAt(Date.now());
         setRemoteSyncStatus(hasPendingRemoteSync() ? 'pending' : 'synced');
+        onRemoteUpdateSucceeded?.(
+          withLifecycleValues(
+            {
+              ...createLifecycleMetadata(),
+              syncedValues: pendingValues
+            },
+            valuesRef.current
+          )
+        );
 
         if (hasPendingRemoteSync()) {
           if (debounceMs > 0) {
@@ -952,7 +1096,7 @@ export function useIncrementalFunnel<
             void flushRemoteUpdates();
           }
         }
-      } catch {
+      } catch (error) {
         pendingRemoteValuesRef.current = {
           ...(pendingValues as Record<string, unknown>),
           ...(pendingRemoteValuesRef.current as Record<string, unknown>)
@@ -965,6 +1109,16 @@ export function useIncrementalFunnel<
           pendingRemoteStepStateRef.current = pendingStepState;
         }
         setRemoteSyncStatus('failed');
+        onRemoteUpdateFailed?.(
+          withLifecycleValues(
+            {
+              ...createLifecycleMetadata(),
+              failedValues: pendingValues,
+              error
+            },
+            valuesRef.current
+          )
+        );
       }
     })();
 
@@ -975,11 +1129,15 @@ export function useIncrementalFunnel<
     await remoteSyncInFlightRef.current;
   }, [
     debounceMs,
+    createLifecycleMetadata,
     hasPendingRemoteSync,
     includeStepStateInRemoteUpdate,
+    onRemoteUpdateFailed,
+    onRemoteUpdateSucceeded,
     remoteUpdate,
     resolvedRemoteUpdate,
-    updateRemote
+    updateRemote,
+    withLifecycleValues
   ]);
 
   const queueRemoteUpdate = useCallback(
@@ -1052,18 +1210,36 @@ export function useIncrementalFunnel<
         ...values,
         ...nextValues
       } as Partial<TValues>;
+      valuesRef.current = mergedValues;
       setValues(mergedValues);
       setAllValidationState(createEmptyValidationState());
       runStepValidation(currentStepIdRef.current, mergedValues);
+      onValuesChanged?.(
+        withLifecycleValues(
+          {
+            ...createLifecycleMetadata(),
+            changedValues: nextValues
+          },
+          mergedValues
+        )
+      );
       queueRemoteUpdate(nextValues, {
         currentStepId: currentStepIdRef.current,
         completedStepIds: completedStepIdsRef.current
       });
     },
-    [queueRemoteUpdate, runStepValidation, values]
+    [
+      createLifecycleMetadata,
+      onValuesChanged,
+      queueRemoteUpdate,
+      runStepValidation,
+      values,
+      withLifecycleValues
+    ]
   );
 
   const clearValues = useCallback(() => {
+    valuesRef.current = resolvedInitialValues;
     setValues(resolvedInitialValues);
     setIsSubmitted(false);
     isSubmittedRef.current = false;
@@ -1071,11 +1247,26 @@ export function useIncrementalFunnel<
     setSubmitError(null);
     setStepValidationState(createEmptyValidationState());
     setAllValidationState(createEmptyValidationState());
+    onValuesChanged?.(
+      withLifecycleValues(
+        {
+          ...createLifecycleMetadata(),
+          changedValues: resolvedInitialValues
+        },
+        resolvedInitialValues
+      )
+    );
     queueRemoteUpdate(resolvedInitialValues, {
       currentStepId: currentStepIdRef.current,
       completedStepIds: completedStepIdsRef.current
     });
-  }, [queueRemoteUpdate, resolvedInitialValues]);
+  }, [
+    createLifecycleMetadata,
+    onValuesChanged,
+    queueRemoteUpdate,
+    resolvedInitialValues,
+    withLifecycleValues
+  ]);
 
   const clearSavedProgress = useCallback(() => {
     if (storageKey) {
@@ -1093,9 +1284,12 @@ export function useIncrementalFunnel<
   }, []);
 
   const startAgain = useCallback(() => {
+    const previousStep = currentStepIdRef.current;
+    const resetStep = initialCurrentStepId;
+    valuesRef.current = resolvedInitialValues;
     clearSavedProgress();
     setValues(resolvedInitialValues);
-    setCurrentStepId(initialCurrentStepId);
+    setCurrentStepId(resetStep);
     setCompletedStepIds([]);
     setIsSubmitted(false);
     isSubmittedRef.current = false;
@@ -1117,12 +1311,40 @@ export function useIncrementalFunnel<
       setSessionCreationStatus('idle');
       setSessionCreationError(null);
     }
+    onFunnelReset?.(
+      withLifecycleValues(
+        createLifecycleMetadata({
+          stepId: resetStep,
+          completedStepIds: []
+        }),
+        resolvedInitialValues
+      )
+    );
+    if (resetStep !== null) {
+      onStepStarted?.(
+        withLifecycleValues(
+          {
+            ...createLifecycleMetadata({
+              stepId: resetStep,
+              completedStepIds: []
+            }),
+            step: resetStep,
+            previousStep
+          },
+          resolvedInitialValues
+        )
+      );
+    }
   }, [
     clearSavedProgress,
     createSession,
+    createLifecycleMetadata,
     initialCurrentStepId,
+    onFunnelReset,
+    onStepStarted,
     requestSessionCreation,
-    resolvedInitialValues
+    resolvedInitialValues,
+    withLifecycleValues
   ]);
 
   const markSubmitted = useCallback(() => {
@@ -1141,6 +1363,7 @@ export function useIncrementalFunnel<
 
     setSubmitStatus('submitting');
     setSubmitError(null);
+    onSubmitStarted?.(withLifecycleValues(createLifecycleMetadata()));
 
     try {
       if (validateAll) {
@@ -1175,6 +1398,7 @@ export function useIncrementalFunnel<
       setSubmitError(null);
       setStepValidationState(createEmptyValidationState());
       setAllValidationState(createEmptyValidationState());
+      onSubmitSucceeded?.(withLifecycleValues(createLifecycleMetadata(), values));
       clearSavedProgress();
     } catch (error) {
       const nextValidationState = toValidationState(error);
@@ -1183,15 +1407,29 @@ export function useIncrementalFunnel<
       }
       setSubmitStatus('failed');
       setSubmitError(error);
+      onSubmitFailed?.(
+        withLifecycleValues(
+          {
+            ...createLifecycleMetadata(),
+            error
+          },
+          values
+        )
+      );
       throw error;
     }
   }, [
     clearSavedProgress,
+    createLifecycleMetadata,
     flushRemoteUpdates,
+    onSubmitFailed,
+    onSubmitStarted,
+    onSubmitSucceeded,
     submitRemote,
     submitStatus,
     validateAll,
-    values
+    values,
+    withLifecycleValues
   ]);
 
   const goToStep = useCallback(
@@ -1199,14 +1437,33 @@ export function useIncrementalFunnel<
       if (!stepIds.has(stepId)) {
         throw new Error('Step id must exist in steps.');
       }
+      const previousStep = currentStepIdRef.current;
       setCurrentStepId(stepId);
       runStepValidation(stepId, values);
+      onStepStarted?.(
+        withLifecycleValues({
+          ...createLifecycleMetadata({
+            stepId,
+            completedStepIds: completedStepIdsRef.current
+          }),
+          step: stepId,
+          previousStep
+        })
+      );
       queueRemoteUpdate({} as Partial<TValues>, {
         currentStepId: stepId,
         completedStepIds: completedStepIdsRef.current
       });
     },
-    [queueRemoteUpdate, runStepValidation, stepIds, values]
+    [
+      createLifecycleMetadata,
+      onStepStarted,
+      queueRemoteUpdate,
+      runStepValidation,
+      stepIds,
+      values,
+      withLifecycleValues
+    ]
   );
 
   const nextStep = useCallback(() => {
@@ -1222,13 +1479,31 @@ export function useIncrementalFunnel<
 
       const nextStepId = steps[previousIndex + 1] as TStepId;
       runStepValidation(nextStepId, values);
+      onStepStarted?.(
+        withLifecycleValues({
+          ...createLifecycleMetadata({
+            stepId: nextStepId,
+            completedStepIds: completedStepIdsRef.current
+          }),
+          step: nextStepId,
+          previousStep: previousStepId
+        })
+      );
       queueRemoteUpdate({} as Partial<TValues>, {
         currentStepId: nextStepId,
         completedStepIds: completedStepIdsRef.current
       });
       return nextStepId;
     });
-  }, [queueRemoteUpdate, runStepValidation, steps, values]);
+  }, [
+    createLifecycleMetadata,
+    onStepStarted,
+    queueRemoteUpdate,
+    runStepValidation,
+    steps,
+    values,
+    withLifecycleValues
+  ]);
 
   const previousStep = useCallback(() => {
     setCurrentStepId(previousStepId => {
@@ -1243,13 +1518,31 @@ export function useIncrementalFunnel<
 
       const nextStepId = steps[previousIndex - 1] as TStepId;
       runStepValidation(nextStepId, values);
+      onStepStarted?.(
+        withLifecycleValues({
+          ...createLifecycleMetadata({
+            stepId: nextStepId,
+            completedStepIds: completedStepIdsRef.current
+          }),
+          step: nextStepId,
+          previousStep: previousStepId
+        })
+      );
       queueRemoteUpdate({} as Partial<TValues>, {
         currentStepId: nextStepId,
         completedStepIds: completedStepIdsRef.current
       });
       return nextStepId;
     });
-  }, [queueRemoteUpdate, runStepValidation, steps, values]);
+  }, [
+    createLifecycleMetadata,
+    onStepStarted,
+    queueRemoteUpdate,
+    runStepValidation,
+    steps,
+    values,
+    withLifecycleValues
+  ]);
 
   const markStepComplete = useCallback(
     (stepId: TStepId) => {
@@ -1257,9 +1550,19 @@ export function useIncrementalFunnel<
         throw new Error('Step id must exist in steps.');
       }
       setCompletedStepIds(previous => {
-        const nextCompletedIds = previous.includes(stepId)
-          ? previous
-          : [...previous, stepId];
+        if (previous.includes(stepId)) {
+          return previous;
+        }
+        const nextCompletedIds = [...previous, stepId];
+        onStepCompleted?.(
+          withLifecycleValues({
+            ...createLifecycleMetadata({
+              stepId: currentStepIdRef.current,
+              completedStepIds: nextCompletedIds
+            }),
+            step: stepId
+          })
+        );
         queueRemoteUpdate({} as Partial<TValues>, {
           currentStepId: currentStepIdRef.current,
           completedStepIds: nextCompletedIds
@@ -1267,7 +1570,13 @@ export function useIncrementalFunnel<
         return nextCompletedIds;
       });
     },
-    [queueRemoteUpdate, stepIds]
+    [
+      createLifecycleMetadata,
+      onStepCompleted,
+      queueRemoteUpdate,
+      stepIds,
+      withLifecycleValues
+    ]
   );
 
   const markStepIncomplete = useCallback(

@@ -97,6 +97,22 @@ if (!funnel.canContinueCurrentStep) {
 funnel.clearSavedProgress();
 ```
 
+### Lifecycle callbacks
+
+`useIncrementalFunnel` exposes optional lifecycle callbacks for funnel analytics and attribution.
+Callbacks receive safe metadata by default and only include full funnel values when
+`includeValuesInLifecycleCallbacks` is enabled.
+
+```ts
+useIncrementalFunnel({
+  storageKey: 'customer-funnel',
+  onStepCompleted: ({ step }) => {
+    analytics.track('Funnel Step Completed', { step });
+  },
+  includeValuesInLifecycleCallbacks: true
+});
+```
+
 ## Development
 
 ```bash

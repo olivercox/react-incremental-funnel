@@ -737,4 +737,179 @@ describe('useIncrementalFunnel', () => {
       }
     ]);
   });
+
+  it('emits lifecycle callbacks with safe metadata by default', async () => {
+    type FunnelValues = {
+      email?: string;
+    };
+    const onStepStarted = vi.fn();
+    const onStepCompleted = vi.fn();
+    const onValuesChanged = vi.fn();
+    const onRemoteUpdateSucceeded = vi.fn();
+    const onSubmitStarted = vi.fn();
+    const onSubmitSucceeded = vi.fn();
+    const onFunnelReset = vi.fn();
+    let snapshot:
+      | ReturnType<typeof useIncrementalFunnel<FunnelValues, 'welcome' | 'details'>>
+      | undefined;
+
+    function Example(): null {
+      const didUpdateRef = useRef(false);
+      const funnel = useIncrementalFunnel<FunnelValues, 'welcome' | 'details'>({
+        steps: ['welcome', 'details'] as const,
+        updateRemote: async () => undefined,
+        submitRemote: async () => undefined,
+        onStepStarted,
+        onStepCompleted,
+        onValuesChanged,
+        onRemoteUpdateSucceeded,
+        onSubmitStarted,
+        onSubmitSucceeded,
+        onFunnelReset
+      });
+
+      if (!didUpdateRef.current) {
+        didUpdateRef.current = true;
+        funnel.updateValues({ email: 'hello@example.com' });
+        funnel.nextStep();
+        funnel.markStepComplete('welcome');
+      }
+
+      snapshot = funnel;
+      return null;
+    }
+
+    renderToString(createElement(Example));
+    await snapshot?.flushRemoteUpdates();
+    await expect(snapshot?.submit()).resolves.toBeUndefined();
+    snapshot?.startAgain();
+
+    expect(onValuesChanged).toHaveBeenCalledWith(
+      expect.objectContaining({
+        changedValues: { email: 'hello@example.com' },
+        stepId: 'welcome',
+        completedStepIds: []
+      })
+    );
+    expect(onValuesChanged.mock.calls[0]?.[0]).not.toHaveProperty('values');
+    expect(onStepStarted).toHaveBeenCalledWith(
+      expect.objectContaining({
+        step: 'details',
+        previousStep: 'welcome'
+      })
+    );
+    expect(onStepCompleted).toHaveBeenCalledWith(
+      expect.objectContaining({
+        step: 'welcome',
+        completedStepIds: ['welcome']
+      })
+    );
+    expect(onStepCompleted.mock.calls[0]?.[0]).not.toHaveProperty('values');
+    expect(onRemoteUpdateSucceeded).toHaveBeenCalledWith(
+      expect.objectContaining({
+        syncedValues: { email: 'hello@example.com' }
+      })
+    );
+    expect(onSubmitStarted).toHaveBeenCalledTimes(1);
+    expect(onSubmitSucceeded).toHaveBeenCalledTimes(1);
+    expect(onFunnelReset).toHaveBeenCalledTimes(1);
+    expect(onFunnelReset.mock.calls[0]?.[0]).not.toHaveProperty('values');
+  });
+
+  it('includes full values in lifecycle callbacks when explicitly enabled', async () => {
+    type FunnelValues = {
+      email?: string;
+      firstName?: string;
+    };
+    let updateAttempt = 0;
+    const updateRemote = vi.fn(async () => {
+      updateAttempt += 1;
+      if (updateAttempt === 1) {
+        throw new Error('sync failed');
+      }
+    });
+    const submitError = new Error('submit failed');
+    const submitRemote = vi.fn(async () => {
+      throw submitError;
+    });
+    const onValuesChanged = vi.fn();
+    const onRemoteUpdateFailed = vi.fn();
+    const onRemoteUpdateSucceeded = vi.fn();
+    const onSubmitFailed = vi.fn();
+    let snapshot:
+      | ReturnType<typeof useIncrementalFunnel<FunnelValues, 'welcome' | 'details'>>
+      | undefined;
+
+    function Example(): null {
+      const didUpdateRef = useRef(false);
+      const funnel = useIncrementalFunnel<FunnelValues, 'welcome' | 'details'>({
+        steps: ['welcome', 'details'] as const,
+        includeValuesInLifecycleCallbacks: true,
+        updateRemote,
+        submitRemote,
+        onValuesChanged,
+        onRemoteUpdateFailed,
+        onRemoteUpdateSucceeded,
+        onSubmitFailed
+      });
+
+      if (!didUpdateRef.current) {
+        didUpdateRef.current = true;
+        funnel.updateValues({
+          email: 'hello@example.com',
+          firstName: 'Ada'
+        });
+      }
+
+      snapshot = funnel;
+      return null;
+    }
+
+    renderToString(createElement(Example));
+    await snapshot?.flushRemoteUpdates();
+    await snapshot?.retryRemoteUpdates();
+    await expect(snapshot?.submit()).rejects.toBe(submitError);
+
+    expect(onValuesChanged).toHaveBeenCalledWith(
+      expect.objectContaining({
+        values: {
+          email: 'hello@example.com',
+          firstName: 'Ada'
+        }
+      })
+    );
+    expect(onRemoteUpdateFailed).toHaveBeenCalledWith(
+      expect.objectContaining({
+        failedValues: {
+          email: 'hello@example.com',
+          firstName: 'Ada'
+        },
+        values: {
+          email: 'hello@example.com',
+          firstName: 'Ada'
+        }
+      })
+    );
+    expect(onRemoteUpdateSucceeded).toHaveBeenCalledWith(
+      expect.objectContaining({
+        syncedValues: {
+          email: 'hello@example.com',
+          firstName: 'Ada'
+        },
+        values: {
+          email: 'hello@example.com',
+          firstName: 'Ada'
+        }
+      })
+    );
+    expect(onSubmitFailed).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: submitError,
+        values: {
+          email: 'hello@example.com',
+          firstName: 'Ada'
+        }
+      })
+    );
+  });
 });
