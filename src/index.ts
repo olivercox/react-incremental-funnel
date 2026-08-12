@@ -484,7 +484,7 @@ export function useIncrementalFunnel<
   const didEmitFunnelStartedRef = useRef(false);
   const resolvedRemoteUpdate = updateRemote ?? remoteUpdate;
   const withLifecycleValues = useCallback(
-    <TPayload extends Record<string, unknown>>(
+    <TPayload extends object>(
       payload: TPayload,
       eventValues?: Partial<TValues>
     ): TPayload & IncrementalFunnelLifecycleValues<TValues> => {
