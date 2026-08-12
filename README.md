@@ -252,6 +252,51 @@ npm run test
 npm run build
 ```
 
+## Release workflow
+
+This package uses [Changesets](https://github.com/changesets/changesets) for versioning and changelogs.
+
+### Add a changeset in your PR
+
+If your PR changes package behavior, add a changeset:
+
+```bash
+npm run changeset
+```
+
+Choose the bump type:
+
+- `patch`: bug fixes and other backwards-compatible fixes.
+- `minor`: backwards-compatible features.
+- `major`: breaking changes.
+
+### How releases happen
+
+- Changes merge through pull requests into `main`.
+- On pushes to `main`, the Release workflow runs `changesets/action`.
+- If unreleased changesets exist, it creates or updates a release PR with:
+  - `package.json` version updates
+  - `CHANGELOG.md` updates
+  - consumed changesets removed
+- When that release PR is merged, the same workflow publishes to npm with:
+  - `npm publish --provenance --access public`
+  - GitHub OIDC Trusted Publishing (`id-token: write`) via GitHub Actions
+
+Do not normally run `npm publish` from a developer machine.
+
+### Stable and prerelease channels
+
+- Stable releases are published from `main` to the default `latest` tag (for example `1.1.0`).
+- If prereleases are needed, use Changesets prerelease mode and publish with a prerelease tag such as `next` (for example `1.2.0-next.0`).
+
+### Local package verification
+
+Before release, verify package contents locally:
+
+```bash
+npm pack --dry-run
+```
+
 ## Public API
 
 - `createFunnel`
