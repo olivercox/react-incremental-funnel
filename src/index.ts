@@ -24,6 +24,7 @@ export {
   createMemoryStorageAdapter,
   createSessionStorageAdapter
 } from './storage';
+export { pickPersistableValues, redactValues, removeBlockedFields } from './value-utils';
 
 export type FunnelStepId = string;
 
