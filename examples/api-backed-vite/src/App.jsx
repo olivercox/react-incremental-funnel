@@ -2,23 +2,37 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { useIncrementalFunnel } from 'react-incremental-funnel';
 import './App.css';
 
-const steps = ['intro', 'details', 'review'];
+const steps = ['names', 'contact', 'address-consent'];
 
 const initialValues = {
-  requestCategory: 'companionship',
-  serviceFrequency: 'weekly',
-  contactEmail: '',
-  temporaryQuestion: '',
-  sensitiveNotes: '',
+  firstName: '',
+  lastName: '',
+  email: '',
+  phone: '',
+  addressLine1: '',
+  addressLine2: '',
+  city: '',
+  region: '',
+  postalCode: '',
+  country: '',
+  acceptTerms: false,
+  marketingConsent: false,
   simulateError: false
 };
 
 const fieldPolicies = {
-  requestCategory: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 },
-  serviceFrequency: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 },
-  contactEmail: { persist: 'session', ttlMs: 30 * 60 * 1000 },
-  temporaryQuestion: { persist: 'memory' },
-  sensitiveNotes: { persist: 'remoteOnly' },
+  firstName: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 },
+  lastName: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 },
+  email: { persist: 'session', ttlMs: 30 * 60 * 1000 },
+  phone: { persist: 'session', ttlMs: 30 * 60 * 1000 },
+  addressLine1: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 },
+  addressLine2: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 },
+  city: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 },
+  region: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 },
+  postalCode: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 },
+  country: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 },
+  acceptTerms: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 },
+  marketingConsent: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 },
   simulateError: { persist: 'remoteOnly' }
 };
 
@@ -94,14 +108,21 @@ function App() {
   });
 
   const step = funnel.currentStepId;
-  const isReview = step === 'review';
+  const isAddressConsent = step === 'address-consent';
   const publicReview = useMemo(
     () => ({
-      requestCategory: funnel.values.requestCategory,
-      serviceFrequency: funnel.values.serviceFrequency,
-      contactEmail: funnel.values.contactEmail,
-      temporaryQuestion: funnel.values.temporaryQuestion,
-      sensitiveNotes: funnel.values.sensitiveNotes ? '[remoteOnly value hidden in local storage]' : ''
+      firstName: funnel.values.firstName,
+      lastName: funnel.values.lastName,
+      email: funnel.values.email,
+      phone: funnel.values.phone,
+      addressLine1: funnel.values.addressLine1,
+      addressLine2: funnel.values.addressLine2,
+      city: funnel.values.city,
+      region: funnel.values.region,
+      postalCode: funnel.values.postalCode,
+      country: funnel.values.country,
+      acceptTerms: funnel.values.acceptTerms,
+      marketingConsent: funnel.values.marketingConsent
     }),
     [funnel.values]
   );
@@ -170,62 +191,108 @@ function App() {
         <pre>{JSON.stringify(draftMetadata, null, 2)}</pre>
       </section>
 
-      {step === 'intro' ? (
+      {step === 'names' ? (
         <section className="card">
-          <h2>Intro</h2>
+          <h2>Names</h2>
           <label>
-            Request category (local)
-            <select
-              value={funnel.values.requestCategory ?? 'companionship'}
-              onChange={event => funnel.updateValues({ requestCategory: event.target.value })}
-            >
-              <option value="companionship">Companionship</option>
-              <option value="home-help">Home help</option>
-              <option value="transport">Transport</option>
-            </select>
+            First name (local)
+            <input
+              value={funnel.values.firstName ?? ''}
+              onChange={event => funnel.updateValues({ firstName: event.target.value })}
+            />
+          </label>
+          <label>
+            Last name (local)
+            <input
+              value={funnel.values.lastName ?? ''}
+              onChange={event => funnel.updateValues({ lastName: event.target.value })}
+            />
           </label>
         </section>
       ) : null}
 
-      {step === 'details' ? (
+      {step === 'contact' ? (
         <section className="card">
-          <h2>Details</h2>
+          <h2>Email and phone</h2>
           <label>
-            Service frequency (local)
-            <select
-              value={funnel.values.serviceFrequency ?? 'weekly'}
-              onChange={event => funnel.updateValues({ serviceFrequency: event.target.value })}
-            >
-              <option value="weekly">Weekly</option>
-              <option value="fortnightly">Fortnightly</option>
-              <option value="monthly">Monthly</option>
-            </select>
-          </label>
-
-          <label>
-            Contact email (session)
+            Email (session)
             <input
-              value={funnel.values.contactEmail ?? ''}
-              onChange={event => funnel.updateValues({ contactEmail: event.target.value })}
+              value={funnel.values.email ?? ''}
+              onChange={event => funnel.updateValues({ email: event.target.value })}
             />
           </label>
 
           <label>
-            Temporary question (memory only)
+            Phone (session)
             <input
-              value={funnel.values.temporaryQuestion ?? ''}
-              onChange={event => funnel.updateValues({ temporaryQuestion: event.target.value })}
+              value={funnel.values.phone ?? ''}
+              onChange={event => funnel.updateValues({ phone: event.target.value })}
             />
           </label>
+        </section>
+      ) : null}
 
+      {isAddressConsent ? (
+        <section className="card">
+          <h2>Address, terms and marketing consent</h2>
           <label>
-            Sensitive notes (remoteOnly, never in browser storage)
-            <textarea
-              value={funnel.values.sensitiveNotes ?? ''}
-              onChange={event => funnel.updateValues({ sensitiveNotes: event.target.value })}
+            Address line 1 (local)
+            <input
+              value={funnel.values.addressLine1 ?? ''}
+              onChange={event => funnel.updateValues({ addressLine1: event.target.value })}
             />
           </label>
-
+          <label>
+            Address line 2 (local)
+            <input
+              value={funnel.values.addressLine2 ?? ''}
+              onChange={event => funnel.updateValues({ addressLine2: event.target.value })}
+            />
+          </label>
+          <label>
+            City (local)
+            <input
+              value={funnel.values.city ?? ''}
+              onChange={event => funnel.updateValues({ city: event.target.value })}
+            />
+          </label>
+          <label>
+            State/region (local)
+            <input
+              value={funnel.values.region ?? ''}
+              onChange={event => funnel.updateValues({ region: event.target.value })}
+            />
+          </label>
+          <label>
+            Postal code (local)
+            <input
+              value={funnel.values.postalCode ?? ''}
+              onChange={event => funnel.updateValues({ postalCode: event.target.value })}
+            />
+          </label>
+          <label>
+            Country (local)
+            <input
+              value={funnel.values.country ?? ''}
+              onChange={event => funnel.updateValues({ country: event.target.value })}
+            />
+          </label>
+          <label className="checkbox">
+            <input
+              type="checkbox"
+              checked={Boolean(funnel.values.acceptTerms)}
+              onChange={event => funnel.updateValues({ acceptTerms: event.target.checked })}
+            />
+            I accept the terms and conditions
+          </label>
+          <label className="checkbox">
+            <input
+              type="checkbox"
+              checked={Boolean(funnel.values.marketingConsent)}
+              onChange={event => funnel.updateValues({ marketingConsent: event.target.checked })}
+            />
+            I consent to marketing updates
+          </label>
           <label className="checkbox">
             <input
               type="checkbox"
@@ -238,14 +305,12 @@ function App() {
           <button type="button" onClick={() => void funnel.retryRemoteUpdates()}>
             Retry remote updates
           </button>
-        </section>
-      ) : null}
-
-      {isReview ? (
-        <section className="card">
-          <h2>Review and submit</h2>
           <pre>{JSON.stringify(publicReview, null, 2)}</pre>
-          <button type="button" onClick={submit} disabled={funnel.submitStatus === 'submitting'}>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={funnel.submitStatus === 'submitting' || !funnel.values.acceptTerms}
+          >
             {funnel.submitStatus === 'submitting' ? 'Submitting…' : 'Submit draft'}
           </button>
         </section>

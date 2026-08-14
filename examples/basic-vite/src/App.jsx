@@ -1,25 +1,37 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback } from 'react';
 import { useIncrementalFunnel } from 'react-incremental-funnel';
 import './App.css';
 
-const steps = ['start', 'details', 'review'];
+const steps = ['names', 'contact', 'address-consent'];
 
 const defaultValues = {
-  funnelVariant: 'standard',
-  selectedServices: [],
-  frequency: 'weekly',
-  contactEmail: '',
-  extraContext: '',
-  oneTimeBudget: ''
+  firstName: '',
+  lastName: '',
+  email: '',
+  phone: '',
+  addressLine1: '',
+  addressLine2: '',
+  city: '',
+  region: '',
+  postalCode: '',
+  country: '',
+  acceptTerms: false,
+  marketingConsent: false
 };
 
 const fieldPolicies = {
-  funnelVariant: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 },
-  selectedServices: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 },
-  frequency: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 },
-  contactEmail: { persist: 'session', ttlMs: 15 * 60 * 1000 },
-  extraContext: { persist: 'memory' },
-  oneTimeBudget: { persist: 'memory' }
+  firstName: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 },
+  lastName: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 },
+  email: { persist: 'session', ttlMs: 15 * 60 * 1000 },
+  phone: { persist: 'session', ttlMs: 15 * 60 * 1000 },
+  addressLine1: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 },
+  addressLine2: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 },
+  city: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 },
+  region: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 },
+  postalCode: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 },
+  country: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 },
+  acceptTerms: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 },
+  marketingConsent: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 }
 };
 
 function App() {
@@ -38,22 +50,6 @@ function App() {
   });
 
   const currentStep = funnel.currentStepId;
-  const selectedServices = useMemo(
-    () => new Set(funnel.values.selectedServices ?? []),
-    [funnel.values.selectedServices]
-  );
-
-  const updateService = service => {
-    const next = new Set(selectedServices);
-    if (next.has(service)) {
-      next.delete(service);
-    } else {
-      next.add(service);
-    }
-
-    funnel.updateValues({ selectedServices: [...next] });
-  };
-
   const moveNext = () => {
     if (!currentStep) {
       return;
@@ -117,82 +113,114 @@ function App() {
         </p>
       </section>
 
-      {currentStep === 'start' ? (
+      {currentStep === 'names' ? (
         <section className="card">
-          <h2>Start</h2>
+          <h2>Names</h2>
           <label>
-            Funnel variant (local)
-            <select
-              value={funnel.values.funnelVariant ?? 'standard'}
-              onChange={event => funnel.updateValues({ funnelVariant: event.target.value })}
-            >
-              <option value="standard">Standard</option>
-              <option value="priority">Priority</option>
-            </select>
-          </label>
-        </section>
-      ) : null}
-
-      {currentStep === 'details' ? (
-        <section className="card">
-          <h2>Details</h2>
-          <div>
-            <p>Selected services (local)</p>
-            {['Companionship', 'Transport', 'Meal prep'].map(service => (
-              <label key={service} className="checkbox">
-                <input
-                  type="checkbox"
-                  checked={selectedServices.has(service)}
-                  onChange={() => updateService(service)}
-                />
-                {service}
-              </label>
-            ))}
-          </div>
-
-          <label>
-            Visit frequency (local)
-            <select
-              value={funnel.values.frequency ?? 'weekly'}
-              onChange={event => funnel.updateValues({ frequency: event.target.value })}
-            >
-              <option value="weekly">Weekly</option>
-              <option value="fortnightly">Fortnightly</option>
-              <option value="monthly">Monthly</option>
-            </select>
-          </label>
-
-          <label>
-            Contact email (session, 15-minute TTL)
+            First name (local)
             <input
-              value={funnel.values.contactEmail ?? ''}
-              onChange={event => funnel.updateValues({ contactEmail: event.target.value })}
+              value={funnel.values.firstName ?? ''}
+              onChange={event => funnel.updateValues({ firstName: event.target.value })}
             />
           </label>
-
           <label>
-            Additional context (memory only)
-            <textarea
-              value={funnel.values.extraContext ?? ''}
-              onChange={event => funnel.updateValues({ extraContext: event.target.value })}
-            />
-          </label>
-
-          <label>
-            One-time budget note (memory only)
+            Last name (local)
             <input
-              value={funnel.values.oneTimeBudget ?? ''}
-              onChange={event => funnel.updateValues({ oneTimeBudget: event.target.value })}
+              value={funnel.values.lastName ?? ''}
+              onChange={event => funnel.updateValues({ lastName: event.target.value })}
             />
           </label>
         </section>
       ) : null}
 
-      {currentStep === 'review' ? (
+      {currentStep === 'contact' ? (
         <section className="card">
-          <h2>Review and submit</h2>
+          <h2>Email and phone</h2>
+          <label>
+            Email (session, 15-minute TTL)
+            <input
+              value={funnel.values.email ?? ''}
+              onChange={event => funnel.updateValues({ email: event.target.value })}
+            />
+          </label>
+
+          <label>
+            Phone (session, 15-minute TTL)
+            <input
+              value={funnel.values.phone ?? ''}
+              onChange={event => funnel.updateValues({ phone: event.target.value })}
+            />
+          </label>
+        </section>
+      ) : null}
+
+      {currentStep === 'address-consent' ? (
+        <section className="card">
+          <h2>Address, terms and marketing consent</h2>
+          <label>
+            Address line 1 (local)
+            <input
+              value={funnel.values.addressLine1 ?? ''}
+              onChange={event => funnel.updateValues({ addressLine1: event.target.value })}
+            />
+          </label>
+          <label>
+            Address line 2 (local)
+            <input
+              value={funnel.values.addressLine2 ?? ''}
+              onChange={event => funnel.updateValues({ addressLine2: event.target.value })}
+            />
+          </label>
+          <label>
+            City (local)
+            <input
+              value={funnel.values.city ?? ''}
+              onChange={event => funnel.updateValues({ city: event.target.value })}
+            />
+          </label>
+          <label>
+            State/region (local)
+            <input
+              value={funnel.values.region ?? ''}
+              onChange={event => funnel.updateValues({ region: event.target.value })}
+            />
+          </label>
+          <label>
+            Postal code (local)
+            <input
+              value={funnel.values.postalCode ?? ''}
+              onChange={event => funnel.updateValues({ postalCode: event.target.value })}
+            />
+          </label>
+          <label>
+            Country (local)
+            <input
+              value={funnel.values.country ?? ''}
+              onChange={event => funnel.updateValues({ country: event.target.value })}
+            />
+          </label>
+          <label className="checkbox">
+            <input
+              type="checkbox"
+              checked={Boolean(funnel.values.acceptTerms)}
+              onChange={event => funnel.updateValues({ acceptTerms: event.target.checked })}
+            />
+            I accept the terms and conditions
+          </label>
+          <label className="checkbox">
+            <input
+              type="checkbox"
+              checked={Boolean(funnel.values.marketingConsent)}
+              onChange={event => funnel.updateValues({ marketingConsent: event.target.checked })}
+            />
+            I consent to marketing updates
+          </label>
           <pre>{JSON.stringify(funnel.values, null, 2)}</pre>
-          <button type="button" onClick={submit} disabled={funnel.submitStatus === 'submitting'}>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={funnel.submitStatus === 'submitting' || !funnel.values.acceptTerms}
+          >
             {funnel.submitStatus === 'submitting' ? 'Submitting…' : 'Submit mock request'}
           </button>
         </section>
