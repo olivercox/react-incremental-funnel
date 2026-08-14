@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useIncrementalFunnel } from 'react-incremental-funnel';
 import './App.css';
 
@@ -109,24 +109,6 @@ function App() {
 
   const step = funnel.currentStepId;
   const isAddressConsent = step === 'address-consent';
-  const publicReview = useMemo(
-    () => ({
-      firstName: funnel.values.firstName,
-      lastName: funnel.values.lastName,
-      email: funnel.values.email,
-      phone: funnel.values.phone,
-      addressLine1: funnel.values.addressLine1,
-      addressLine2: funnel.values.addressLine2,
-      city: funnel.values.city,
-      region: funnel.values.region,
-      postalCode: funnel.values.postalCode,
-      country: funnel.values.country,
-      acceptTerms: funnel.values.acceptTerms,
-      marketingConsent: funnel.values.marketingConsent
-    }),
-    [funnel.values]
-  );
-
   const flushRemote = useCallback(() => {
     void funnel.flushRemoteUpdates();
   }, [funnel]);
@@ -295,7 +277,6 @@ function App() {
                 />
                 I consent to marketing updates
               </label>
-              <pre>{JSON.stringify(publicReview, null, 2)}</pre>
               <button
                 type="button"
                 onClick={submit}
@@ -326,7 +307,19 @@ function App() {
 
         <aside className="sidebar-column">
           <details className="card sidebar-card">
-            <summary>Remote session metadata</summary>
+            <summary>Funnel metadata</summary>
+            <p>
+              Current step: <strong>{step ?? 'none'}</strong>
+            </p>
+            <p>
+              Completed steps:{' '}
+              {funnel.completedStepIds.length ? funnel.completedStepIds.join(', ') : 'none'}
+            </p>
+            <p>
+              Saved progress exists: <strong>{String(funnel.savedProgressExists)}</strong>
+            </p>
+            <pre>{JSON.stringify(funnel.values, null, 2)}</pre>
+            <h3>Remote section</h3>
             <p>
               Session creation: <strong>{funnel.sessionCreationStatus}</strong>
             </p>
@@ -335,9 +328,6 @@ function App() {
             </p>
             <p>
               Submit: <strong>{funnel.submitStatus}</strong>
-            </p>
-            <p>
-              Saved progress exists: <strong>{String(funnel.savedProgressExists)}</strong>
             </p>
             <label className="checkbox">
               <input
