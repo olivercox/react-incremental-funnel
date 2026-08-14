@@ -1,5 +1,5 @@
 main {
-  max-width: 760px;
+  max-width: 1200px;
   margin: 0 auto;
   padding: 2rem 1rem 3rem;
   font-family: Inter, system-ui, -apple-system, sans-serif;
@@ -55,4 +55,41 @@ pre {
 .error {
   color: #b30000;
   margin-top: 1rem;
+}
+
+
+.example-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 1rem;
+  align-items: start;
+}
+
+.form-column {
+  width: min(100%, 720px);
+  justify-self: center;
+}
+
+.sidebar-column {
+  position: sticky;
+  top: 1rem;
+}
+
+.sidebar-card summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+@media (max-width: 1024px) {
+  .example-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .form-column {
+    width: 100%;
+  }
+
+  .sidebar-column {
+    position: static;
+  }
 }

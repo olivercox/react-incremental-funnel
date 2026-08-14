@@ -181,173 +181,179 @@ function App() {
         </section>
       ) : null}
 
-      <section className="card">
-        <p>
-          Session creation: <strong>{funnel.sessionCreationStatus}</strong>
-        </p>
-        <p>
-          Remote sync: <strong>{funnel.remoteSyncStatus}</strong>
-        </p>
-        <p>
-          Submit: <strong>{funnel.submitStatus}</strong>
-        </p>
-        <p>
-          Saved progress exists: <strong>{String(funnel.savedProgressExists)}</strong>
-        </p>
-        <pre>{JSON.stringify(draftMetadata, null, 2)}</pre>
-      </section>
+      <div className="example-layout">
+        <section className="form-column">
+          {step === 'names' ? (
+            <section className="card">
+              <h2>Names</h2>
+              <label>
+                First name (local)
+                <input
+                  value={funnel.values.firstName ?? ''}
+                  onChange={event => funnel.updateValues({ firstName: event.target.value })}
+                  onBlur={flushRemote}
+                />
+              </label>
+              <label>
+                Last name (local)
+                <input
+                  value={funnel.values.lastName ?? ''}
+                  onChange={event => funnel.updateValues({ lastName: event.target.value })}
+                  onBlur={flushRemote}
+                />
+              </label>
+            </section>
+          ) : null}
 
-      {step === 'names' ? (
-        <section className="card">
-          <h2>Names</h2>
-          <label>
-            First name (local)
-            <input
-              value={funnel.values.firstName ?? ''}
-              onChange={event => funnel.updateValues({ firstName: event.target.value })}
-              onBlur={flushRemote}
-            />
-          </label>
-          <label>
-            Last name (local)
-            <input
-              value={funnel.values.lastName ?? ''}
-              onChange={event => funnel.updateValues({ lastName: event.target.value })}
-              onBlur={flushRemote}
-            />
-          </label>
+          {step === 'contact' ? (
+            <section className="card">
+              <h2>Email and phone</h2>
+              <label>
+                Email (session)
+                <input
+                  value={funnel.values.email ?? ''}
+                  onChange={event => funnel.updateValues({ email: event.target.value })}
+                  onBlur={flushRemote}
+                />
+              </label>
+
+              <label>
+                Phone (session)
+                <input
+                  value={funnel.values.phone ?? ''}
+                  onChange={event => funnel.updateValues({ phone: event.target.value })}
+                  onBlur={flushRemote}
+                />
+              </label>
+            </section>
+          ) : null}
+
+          {isAddressConsent ? (
+            <section className="card">
+              <h2>Address, terms and marketing consent</h2>
+              <label>
+                Address line 1 (local)
+                <input
+                  value={funnel.values.addressLine1 ?? ''}
+                  onChange={event => funnel.updateValues({ addressLine1: event.target.value })}
+                  onBlur={flushRemote}
+                />
+              </label>
+              <label>
+                Address line 2 (local)
+                <input
+                  value={funnel.values.addressLine2 ?? ''}
+                  onChange={event => funnel.updateValues({ addressLine2: event.target.value })}
+                  onBlur={flushRemote}
+                />
+              </label>
+              <label>
+                City (local)
+                <input
+                  value={funnel.values.city ?? ''}
+                  onChange={event => funnel.updateValues({ city: event.target.value })}
+                  onBlur={flushRemote}
+                />
+              </label>
+              <label>
+                State/region (local)
+                <input
+                  value={funnel.values.region ?? ''}
+                  onChange={event => funnel.updateValues({ region: event.target.value })}
+                  onBlur={flushRemote}
+                />
+              </label>
+              <label>
+                Postal code (local)
+                <input
+                  value={funnel.values.postalCode ?? ''}
+                  onChange={event => funnel.updateValues({ postalCode: event.target.value })}
+                  onBlur={flushRemote}
+                />
+              </label>
+              <label>
+                Country (local)
+                <input
+                  value={funnel.values.country ?? ''}
+                  onChange={event => funnel.updateValues({ country: event.target.value })}
+                  onBlur={flushRemote}
+                />
+              </label>
+              <label className="checkbox">
+                <input
+                  type="checkbox"
+                  checked={Boolean(funnel.values.acceptTerms)}
+                  onChange={event => funnel.updateValues({ acceptTerms: event.target.checked })}
+                />
+                I accept the terms and conditions
+              </label>
+              <label className="checkbox">
+                <input
+                  type="checkbox"
+                  checked={Boolean(funnel.values.marketingConsent)}
+                  onChange={event => funnel.updateValues({ marketingConsent: event.target.checked })}
+                />
+                I consent to marketing updates
+              </label>
+              <pre>{JSON.stringify(publicReview, null, 2)}</pre>
+              <button
+                type="button"
+                onClick={submit}
+                disabled={funnel.submitStatus === 'submitting' || !funnel.values.acceptTerms}
+              >
+                {funnel.submitStatus === 'submitting' ? 'Submitting…' : 'Submit draft'}
+              </button>
+            </section>
+          ) : null}
+
+          <section className="row">
+            <button type="button" onClick={previous} disabled={!funnel.canGoBack}>
+              Back
+            </button>
+            <button type="button" onClick={next} disabled={!funnel.canGoNext}>
+              Next
+            </button>
+            <button type="button" onClick={funnel.startAgain}>
+              Start again
+            </button>
+          </section>
+
+          {funnel.sessionCreationError ? (
+            <p className="error">Session error: {String(funnel.sessionCreationError)}</p>
+          ) : null}
+          {funnel.submitError ? <p className="error">Submit error: {String(funnel.submitError)}</p> : null}
         </section>
-      ) : null}
 
-      {step === 'contact' ? (
-        <section className="card">
-          <h2>Email and phone</h2>
-          <label>
-            Email (session)
-            <input
-              value={funnel.values.email ?? ''}
-              onChange={event => funnel.updateValues({ email: event.target.value })}
-              onBlur={flushRemote}
-            />
-          </label>
-
-          <label>
-            Phone (session)
-            <input
-              value={funnel.values.phone ?? ''}
-              onChange={event => funnel.updateValues({ phone: event.target.value })}
-              onBlur={flushRemote}
-            />
-          </label>
-        </section>
-      ) : null}
-
-      {isAddressConsent ? (
-        <section className="card">
-          <h2>Address, terms and marketing consent</h2>
-          <label>
-            Address line 1 (local)
-            <input
-              value={funnel.values.addressLine1 ?? ''}
-              onChange={event => funnel.updateValues({ addressLine1: event.target.value })}
-              onBlur={flushRemote}
-            />
-          </label>
-          <label>
-            Address line 2 (local)
-            <input
-              value={funnel.values.addressLine2 ?? ''}
-              onChange={event => funnel.updateValues({ addressLine2: event.target.value })}
-              onBlur={flushRemote}
-            />
-          </label>
-          <label>
-            City (local)
-            <input
-              value={funnel.values.city ?? ''}
-              onChange={event => funnel.updateValues({ city: event.target.value })}
-              onBlur={flushRemote}
-            />
-          </label>
-          <label>
-            State/region (local)
-            <input
-              value={funnel.values.region ?? ''}
-              onChange={event => funnel.updateValues({ region: event.target.value })}
-              onBlur={flushRemote}
-            />
-          </label>
-          <label>
-            Postal code (local)
-            <input
-              value={funnel.values.postalCode ?? ''}
-              onChange={event => funnel.updateValues({ postalCode: event.target.value })}
-              onBlur={flushRemote}
-            />
-          </label>
-          <label>
-            Country (local)
-            <input
-              value={funnel.values.country ?? ''}
-              onChange={event => funnel.updateValues({ country: event.target.value })}
-              onBlur={flushRemote}
-            />
-          </label>
-          <label className="checkbox">
-            <input
-              type="checkbox"
-              checked={Boolean(funnel.values.acceptTerms)}
-              onChange={event => funnel.updateValues({ acceptTerms: event.target.checked })}
-            />
-            I accept the terms and conditions
-          </label>
-          <label className="checkbox">
-            <input
-              type="checkbox"
-              checked={Boolean(funnel.values.marketingConsent)}
-              onChange={event => funnel.updateValues({ marketingConsent: event.target.checked })}
-            />
-            I consent to marketing updates
-          </label>
-          <label className="checkbox">
-            <input
-              type="checkbox"
-              checked={Boolean(funnel.values.simulateError)}
-              onChange={event => funnel.updateValues({ simulateError: event.target.checked })}
-            />
-            Simulate remote update error
-          </label>
-
-          <button type="button" onClick={() => void funnel.retryRemoteUpdates()}>
-            Retry remote updates
-          </button>
-          <pre>{JSON.stringify(publicReview, null, 2)}</pre>
-          <button
-            type="button"
-            onClick={submit}
-            disabled={funnel.submitStatus === 'submitting' || !funnel.values.acceptTerms}
-          >
-            {funnel.submitStatus === 'submitting' ? 'Submitting…' : 'Submit draft'}
-          </button>
-        </section>
-      ) : null}
-
-      <section className="row">
-        <button type="button" onClick={previous} disabled={!funnel.canGoBack}>
-          Back
-        </button>
-        <button type="button" onClick={next} disabled={!funnel.canGoNext}>
-          Next
-        </button>
-        <button type="button" onClick={funnel.startAgain}>
-          Start again
-        </button>
-      </section>
-
-      {funnel.sessionCreationError ? (
-        <p className="error">Session error: {String(funnel.sessionCreationError)}</p>
-      ) : null}
-      {funnel.submitError ? <p className="error">Submit error: {String(funnel.submitError)}</p> : null}
+        <aside className="sidebar-column">
+          <details className="card sidebar-card">
+            <summary>Remote session metadata</summary>
+            <p>
+              Session creation: <strong>{funnel.sessionCreationStatus}</strong>
+            </p>
+            <p>
+              Remote sync: <strong>{funnel.remoteSyncStatus}</strong>
+            </p>
+            <p>
+              Submit: <strong>{funnel.submitStatus}</strong>
+            </p>
+            <p>
+              Saved progress exists: <strong>{String(funnel.savedProgressExists)}</strong>
+            </p>
+            <label className="checkbox">
+              <input
+                type="checkbox"
+                checked={Boolean(funnel.values.simulateError)}
+                onChange={event => funnel.updateValues({ simulateError: event.target.checked })}
+              />
+              Simulate remote update error
+            </label>
+            <button type="button" onClick={() => void funnel.retryRemoteUpdates()}>
+              Retry remote updates
+            </button>
+            <pre>{JSON.stringify(draftMetadata, null, 2)}</pre>
+          </details>
+        </aside>
+      </div>
     </main>
   );
 }
