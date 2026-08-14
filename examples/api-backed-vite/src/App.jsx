@@ -100,7 +100,7 @@ function App() {
     steps,
     persistStepState: true,
     includeStepStateInRemoteUpdate: true,
-    debounceMs: 500,
+    debounceMs: 1_500,
     fieldPolicies,
     createSession,
     updateRemote,
@@ -127,12 +127,17 @@ function App() {
     [funnel.values]
   );
 
+  const flushRemote = useCallback(() => {
+    void funnel.flushRemoteUpdates();
+  }, [funnel]);
+
   const next = () => {
     if (!step) {
       return;
     }
     funnel.markStepComplete(step);
     funnel.nextStep();
+    flushRemote();
   };
 
   const previous = () => {
@@ -141,6 +146,7 @@ function App() {
     }
     funnel.markStepIncomplete(step);
     funnel.previousStep();
+    flushRemote();
   };
 
   const submit = async () => {
@@ -199,6 +205,7 @@ function App() {
             <input
               value={funnel.values.firstName ?? ''}
               onChange={event => funnel.updateValues({ firstName: event.target.value })}
+              onBlur={flushRemote}
             />
           </label>
           <label>
@@ -206,6 +213,7 @@ function App() {
             <input
               value={funnel.values.lastName ?? ''}
               onChange={event => funnel.updateValues({ lastName: event.target.value })}
+              onBlur={flushRemote}
             />
           </label>
         </section>
@@ -219,6 +227,7 @@ function App() {
             <input
               value={funnel.values.email ?? ''}
               onChange={event => funnel.updateValues({ email: event.target.value })}
+              onBlur={flushRemote}
             />
           </label>
 
@@ -227,6 +236,7 @@ function App() {
             <input
               value={funnel.values.phone ?? ''}
               onChange={event => funnel.updateValues({ phone: event.target.value })}
+              onBlur={flushRemote}
             />
           </label>
         </section>
@@ -240,6 +250,7 @@ function App() {
             <input
               value={funnel.values.addressLine1 ?? ''}
               onChange={event => funnel.updateValues({ addressLine1: event.target.value })}
+              onBlur={flushRemote}
             />
           </label>
           <label>
@@ -247,6 +258,7 @@ function App() {
             <input
               value={funnel.values.addressLine2 ?? ''}
               onChange={event => funnel.updateValues({ addressLine2: event.target.value })}
+              onBlur={flushRemote}
             />
           </label>
           <label>
@@ -254,6 +266,7 @@ function App() {
             <input
               value={funnel.values.city ?? ''}
               onChange={event => funnel.updateValues({ city: event.target.value })}
+              onBlur={flushRemote}
             />
           </label>
           <label>
@@ -261,6 +274,7 @@ function App() {
             <input
               value={funnel.values.region ?? ''}
               onChange={event => funnel.updateValues({ region: event.target.value })}
+              onBlur={flushRemote}
             />
           </label>
           <label>
@@ -268,6 +282,7 @@ function App() {
             <input
               value={funnel.values.postalCode ?? ''}
               onChange={event => funnel.updateValues({ postalCode: event.target.value })}
+              onBlur={flushRemote}
             />
           </label>
           <label>
@@ -275,6 +290,7 @@ function App() {
             <input
               value={funnel.values.country ?? ''}
               onChange={event => funnel.updateValues({ country: event.target.value })}
+              onBlur={flushRemote}
             />
           </label>
           <label className="checkbox">
