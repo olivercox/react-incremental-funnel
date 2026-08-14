@@ -104,8 +104,8 @@ const server = createServer(async (request, response) => {
       };
       draft.updatedAt = Date.now();
       sendJson(response, 200, { draftId: id, metadata: toDraftMetadata(draft) });
-    } catch (error) {
-      sendJson(response, 400, { error: String(error) });
+    } catch {
+      sendJson(response, 400, { error: 'Invalid request payload' });
     }
     return;
   }
@@ -141,8 +141,8 @@ const server = createServer(async (request, response) => {
         metadata: toDraftMetadata(draft),
         message: 'Draft submitted'
       });
-    } catch (error) {
-      sendJson(response, 400, { error: String(error) });
+    } catch {
+      sendJson(response, 400, { error: 'Invalid request payload' });
     }
     return;
   }
