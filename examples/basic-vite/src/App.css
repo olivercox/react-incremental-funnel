@@ -1,0 +1,58 @@
+main {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 2rem 1rem 3rem;
+  font-family: Inter, system-ui, -apple-system, sans-serif;
+}
+
+.card {
+  border: 1px solid #d7dce1;
+  border-radius: 8px;
+  padding: 1rem;
+  margin-top: 1rem;
+  background: #fff;
+}
+
+.notice {
+  background: #f5f8ff;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-top: 0.75rem;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.checkbox {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+input,
+textarea,
+select,
+button {
+  font: inherit;
+}
+
+.error {
+  color: #b30000;
+  margin-top: 1rem;
+}
+
+pre {
+  background: #f7f7f7;
+  border-radius: 6px;
+  padding: 0.75rem;
+  overflow: auto;
+}

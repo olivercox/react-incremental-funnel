@@ -8,6 +8,87 @@ TypeScript-first React package for building incremental funnel flows with a smal
 npm install react-incremental-funnel
 ```
 
+## Vite example applications
+
+This repository includes runnable Vite + React examples:
+
+```text
+examples/
+  basic-vite/
+  api-backed-vite/
+```
+
+These examples use generic mock data only (no Good Life Sorted endpoints, schemas, field names, credentials, or business logic).
+
+### Run `basic-vite`
+
+```bash
+cd examples/basic-vite
+npm install
+npm run dev
+```
+
+`basic-vite` demonstrates:
+
+- `useIncrementalFunnel` initialization
+- step navigation and step completion/incompletion
+- field persistence policies (`local`, `session`, `memory`)
+- per-field TTL expiry
+- resume/start-again UX
+- submit lifecycle with a mock client-side submit handler
+
+### Run `api-backed-vite`
+
+In terminal 1:
+
+```bash
+cd examples/api-backed-vite
+npm install
+npm run dev:api
+```
+
+In terminal 2:
+
+```bash
+cd examples/api-backed-vite
+npm run dev
+```
+
+`api-backed-vite` demonstrates:
+
+- remote session creation (`createSession`)
+- debounced draft updates (`debounceMs` + `updateRemote`)
+- remote submit behavior (`submitRemote`)
+- sync status and error handling (`remoteSyncStatus`, retry)
+- reset/start-again behavior
+- local state clearing after submit
+- `remoteOnly` fields sent to the mock API but not persisted in browser storage
+
+### Mock API behavior (`api-backed-vite/mock-server.js`)
+
+The mock API stores drafts in memory for demo purposes and exposes generic endpoints:
+
+- `POST /api/drafts` create a draft session
+- `PATCH /api/drafts/:draftId` update a draft
+- `POST /api/drafts/:draftId/submit` submit a draft
+
+It returns non-sensitive draft metadata only and blocks updates/submissions after a draft is submitted.
+
+### Shared/public device behavior
+
+Both examples include a visible resume/start-again prompt:
+
+- “We found a saved request on this device.”
+- “Continue saved request or start again.”
+
+The prompt does not display sensitive values.
+
+Use `startAgain()` to clear persisted local state and reset funnel values. In API-backed flows, this also starts a new mock draft session.
+
+### Example builds in CI
+
+CI builds both example apps (`npm run build:examples`) so changes that break example integration fail quickly.
+
 ## Basic hook usage
 
 ```tsx
@@ -250,6 +331,7 @@ npm install
 npm run lint
 npm run test
 npm run build
+npm run build:examples
 ```
 
 ## Release workflow
