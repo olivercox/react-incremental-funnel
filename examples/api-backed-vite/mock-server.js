@@ -71,6 +71,7 @@ const server = createServer(async (request, response) => {
       submittedAt: null
     };
     drafts.set(id, draft);
+    console.log(`[POST /api/drafts] created draft ${id}`);
     sendJson(response, 201, { draftId: id, metadata: toDraftMetadata(draft) });
     return;
   }
@@ -80,11 +81,13 @@ const server = createServer(async (request, response) => {
     const draft = id ? drafts.get(id) : null;
 
     if (!draft) {
+      console.log(`[PATCH ${pathname}] draft not found`);
       sendJson(response, 404, { error: 'Draft not found' });
       return;
     }
 
     if (draft.status === 'submitted') {
+      console.log(`[PATCH ${pathname}] already submitted`);
       sendJson(response, 409, { error: 'Draft has already been submitted' });
       return;
     }
@@ -92,8 +95,10 @@ const server = createServer(async (request, response) => {
     try {
       const body = await parseJsonBody(request);
       const values = body?.values ?? {};
+      console.log(`[PATCH ${pathname}] payload`, body);
 
       if (values.simulateError === true) {
+        console.log(`[PATCH ${pathname}] simulated error`);
         sendJson(response, 500, { error: 'Mock remote update failure' });
         return;
       }
@@ -103,8 +108,10 @@ const server = createServer(async (request, response) => {
         ...values
       };
       draft.updatedAt = Date.now();
+      console.log(`[PATCH ${pathname}] updated draft`, draft.values);
       sendJson(response, 200, { draftId: id, metadata: toDraftMetadata(draft) });
     } catch {
+      console.log(`[PATCH ${pathname}] invalid payload`);
       sendJson(response, 400, { error: 'Invalid request payload' });
     }
     return;
@@ -115,11 +122,13 @@ const server = createServer(async (request, response) => {
     const draft = id ? drafts.get(id) : null;
 
     if (!draft) {
+      console.log(`[POST ${pathname}] draft not found`);
       sendJson(response, 404, { error: 'Draft not found' });
       return;
     }
 
     if (draft.status === 'submitted') {
+      console.log(`[POST ${pathname}] already submitted`);
       sendJson(response, 409, { error: 'Draft has already been submitted' });
       return;
     }
@@ -127,6 +136,7 @@ const server = createServer(async (request, response) => {
     try {
       const body = await parseJsonBody(request);
       const values = body?.values ?? {};
+      console.log(`[POST ${pathname}] payload`, body);
 
       draft.values = {
         ...draft.values,
@@ -136,17 +146,20 @@ const server = createServer(async (request, response) => {
       draft.updatedAt = Date.now();
       draft.submittedAt = draft.updatedAt;
 
+      console.log(`[POST ${pathname}] submitted draft`, draft.values);
       sendJson(response, 200, {
         draftId: id,
         metadata: toDraftMetadata(draft),
         message: 'Draft submitted'
       });
     } catch {
+      console.log(`[POST ${pathname}] invalid payload`);
       sendJson(response, 400, { error: 'Invalid request payload' });
     }
     return;
   }
 
+  console.log(`[${method} ${pathname}] not found`);
   sendJson(response, 404, { error: 'Not found' });
 });
 
