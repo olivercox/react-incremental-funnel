@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useIncrementalFunnel } from 'react-incremental-funnel';
 import './App.css';
 
@@ -13,24 +13,28 @@ const defaultValues = {
   oneTimeBudget: ''
 };
 
+const fieldPolicies = {
+  funnelVariant: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 },
+  selectedServices: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 },
+  frequency: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 },
+  contactEmail: { persist: 'session', ttlMs: 15 * 60 * 1000 },
+  extraContext: { persist: 'memory' },
+  oneTimeBudget: { persist: 'memory' }
+};
+
 function App() {
+  const submitRemote = useCallback(async values => {
+    await new Promise(resolve => setTimeout(resolve, 350));
+    window.console.log('Mock submit payload', values);
+  }, []);
+
   const funnel = useIncrementalFunnel({
     storageKey: 'basic-vite-funnel-demo',
     initialValues: defaultValues,
     steps,
     persistStepState: true,
-    fieldPolicies: {
-      funnelVariant: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 },
-      selectedServices: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 },
-      frequency: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 },
-      contactEmail: { persist: 'session', ttlMs: 15 * 60 * 1000 },
-      extraContext: { persist: 'memory' },
-      oneTimeBudget: { persist: 'memory' }
-    },
-    submitRemote: async values => {
-      await new Promise(resolve => setTimeout(resolve, 350));
-      window.console.log('Mock submit payload', values);
-    }
+    fieldPolicies,
+    submitRemote
   });
 
   const currentStep = funnel.currentStepId;

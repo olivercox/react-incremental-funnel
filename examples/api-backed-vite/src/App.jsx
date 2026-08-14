@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useIncrementalFunnel } from 'react-incremental-funnel';
 import './App.css';
 
@@ -13,9 +13,72 @@ const initialValues = {
   simulateError: false
 };
 
+const fieldPolicies = {
+  requestCategory: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 },
+  serviceFrequency: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 },
+  contactEmail: { persist: 'session', ttlMs: 30 * 60 * 1000 },
+  temporaryQuestion: { persist: 'memory' },
+  sensitiveNotes: { persist: 'remoteOnly' },
+  simulateError: { persist: 'remoteOnly' }
+};
+
 function App() {
   const draftIdRef = useRef(null);
   const [draftMetadata, setDraftMetadata] = useState(null);
+  const createSession = useCallback(async () => {
+    const response = await fetch('/api/drafts', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' }
+    });
+
+    if (!response.ok) {
+      throw new Error('Could not create mock draft session');
+    }
+
+    const payload = await response.json();
+    draftIdRef.current = payload.draftId;
+    setDraftMetadata(payload.metadata);
+    return payload.metadata;
+  }, []);
+  const updateRemote = useCallback(async values => {
+    if (!draftIdRef.current) {
+      return;
+    }
+
+    const response = await fetch(`/api/drafts/${draftIdRef.current}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ values })
+    });
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({ error: 'Remote sync failed' }));
+      throw new Error(body.error ?? 'Remote sync failed');
+    }
+
+    const payload = await response.json();
+    setDraftMetadata(payload.metadata);
+  }, []);
+  const submitRemote = useCallback(async values => {
+    if (!draftIdRef.current) {
+      throw new Error('Missing draft session id');
+    }
+
+    const response = await fetch(`/api/drafts/${draftIdRef.current}/submit`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ values })
+    });
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({ error: 'Submit failed' }));
+      throw new Error(body.error ?? 'Submit failed');
+    }
+
+    const payload = await response.json();
+    setDraftMetadata(payload.metadata);
+    draftIdRef.current = payload.draftId;
+  }, []);
 
   const funnel = useIncrementalFunnel({
     storageKey: 'api-backed-vite-funnel-demo',
@@ -24,68 +87,10 @@ function App() {
     persistStepState: true,
     includeStepStateInRemoteUpdate: true,
     debounceMs: 500,
-    fieldPolicies: {
-      requestCategory: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 },
-      serviceFrequency: { persist: 'local', ttlMs: 7 * 24 * 60 * 60 * 1000 },
-      contactEmail: { persist: 'session', ttlMs: 30 * 60 * 1000 },
-      temporaryQuestion: { persist: 'memory' },
-      sensitiveNotes: { persist: 'remoteOnly' },
-      simulateError: { persist: 'remoteOnly' }
-    },
-    createSession: async () => {
-      const response = await fetch('/api/drafts', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' }
-      });
-
-      if (!response.ok) {
-        throw new Error('Could not create mock draft session');
-      }
-
-      const payload = await response.json();
-      draftIdRef.current = payload.draftId;
-      setDraftMetadata(payload.metadata);
-      return payload.metadata;
-    },
-    updateRemote: async values => {
-      if (!draftIdRef.current) {
-        return;
-      }
-
-      const response = await fetch(`/api/drafts/${draftIdRef.current}`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ values })
-      });
-
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({ error: 'Remote sync failed' }));
-        throw new Error(body.error ?? 'Remote sync failed');
-      }
-
-      const payload = await response.json();
-      setDraftMetadata(payload.metadata);
-    },
-    submitRemote: async values => {
-      if (!draftIdRef.current) {
-        throw new Error('Missing draft session id');
-      }
-
-      const response = await fetch(`/api/drafts/${draftIdRef.current}/submit`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ values })
-      });
-
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({ error: 'Submit failed' }));
-        throw new Error(body.error ?? 'Submit failed');
-      }
-
-      const payload = await response.json();
-      setDraftMetadata(payload.metadata);
-      draftIdRef.current = payload.draftId;
-    }
+    fieldPolicies,
+    createSession,
+    updateRemote,
+    submitRemote
   });
 
   const step = funnel.currentStepId;
