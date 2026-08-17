@@ -1,0 +1,18 @@
+version = 3
+knowledge_base = 'Wiki'
+insights = 'Wiki/insights'
+runtime = 'codex'
+harness = ['codex', 'opencode']
+project_skills = true
+
+[[managed_file]]
+path = '.agents/skills/openknowledge/SKILL.md'
+sha256 = '124fba990c5fded3a3fa938e26bd3a3f91e7aa7f4484689d32efbb5cfd60dc47'
+kind = 'project_skill'
+owned = true
+
+[[managed_file]]
+path = '.opencode/skills/openknowledge/SKILL.md'
+sha256 = '124fba990c5fded3a3fa938e26bd3a3f91e7aa7f4484689d32efbb5cfd60dc47'
+kind = 'project_skill'
+owned = true
